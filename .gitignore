@@ -1,0 +1,18 @@
+# Compilation files
+*.o
+*.obj
+*.exe
+*.d
+/bin/
+
+# flex-generated
+lex.yy.c
+lex.yy.cc
+
+# Editor / OS
+.vscode/
+*.swp
+.DS_Store
+
+# Internal docs
+*.txt
