@@ -5,9 +5,14 @@
 *.d
 /bin/
 
+# misc/ scratch parsers: all generated + built output lands here
+misc/build/
+
 # flex-generated
-lex.yy.c
-lex.yy.cc
+*.yy.*
+
+# bison-generated
+*.tab*
 
 # Editor / OS
 .vscode/
