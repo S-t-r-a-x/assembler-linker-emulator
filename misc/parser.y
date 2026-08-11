@@ -1,35 +1,37 @@
-/* Content here lands in parser.tab.h too, not just parser.tab.c -- needed
-   because %parse-param puts Assembler& into yyparse()'s declaration in
-   the header, and lexer.l includes only the header, not this file. */
+%skeleton "lalr1.cc"
+%define api.value.type variant
 
 %code requires {
-  #include "../../inc/assembler.hpp"
-  void yyerror(Assembler &assembler, const char* s);
+  #include "assembler.hpp"
+  #include <cstdint>
+  #include <string>
+  #include <variant>
+  #include <vector>
+  #include <algorithm>
 }
 
 %{
-  #include <cstdio>
-  #include <cstring>
   #include <iostream>
-  #include <string>
+
   using namespace std;
-
-  extern int yylex();
-  extern FILE* yyin;
-
 %}
 
-/* Value carried by tokens/nonterminals. Only IDENT needs one for now. */
-%union {
-  char* sval;
+%code {
+  int yylex(yy::parser::semantic_type* yylval);
 }
+
 %parse-param { Assembler &assembler }
-%token DOT EOL
-%token <sval> IDENT
+
+/* Value carried by tokens/nonterminals. */
+%token DOT COMMA EOL COLON
+%token <std::string> IDENT STRING
+%token <std::uint32_t> NUMBER
+
+%type <OperandList> operand_list
 
 %%
 
-/* program -> line*                                                        */
+/* program -> line */
 program
   : /* empty */
   | program line
@@ -57,48 +59,131 @@ statement
  * preko identa verovatno 
  */
 directive
-  : DOT IDENT IDENT
+  : DOT IDENT
       {
-        if (strcmp($2, "section") == 0)
-          cout << "directive .section " << $3 << "\n";
-        else
-          yyerror(assembler, ("unknown directive ." + string($2)).c_str());
-        free($2); free($3);
-      }
-  | DOT IDENT
-      {
-        if (strcmp($2, "end") == 0)
+        if ($2 == "end") {
+          // TODO
           cout << "directive .end\n";
-        else
-          yyerror(assembler, ("unknown directive ." + string($2)).c_str());
-        free($2);
+        }
+        else {
+          error("unknown directive ." + $2);
+        }
+      }
+  | DOT IDENT operand_list
+      {
+        if ($2 == "section") {
+          if($3.size() != 1)
+            error("section directive usage: .section <section_name>");
+          // checking if the type of operand is a string
+          if(auto* section_name = std::get_if<std::string>(&($3.back()))) {
+            assembler.openSection(*section_name);
+          }
+          else 
+            error("section operand <section_name> must be a string!");
+        }
+        else if ($2 == "global") {
+          // checking if all elements in the vector are strings
+          bool all_symbols = std::all_of(
+            $3.begin(), 
+            $3.end(), 
+            [](const Operand& op) {
+              return std::holds_alternative<std::string>(op);
+            }
+          );
+
+          if(!all_symbols) {
+            error("global directive requires all of its operands to be strings!");
+          }
+
+          // TODO
+        }
+        else if ($2 == "extern") {
+          // checking if all elements in the vector are strings
+          bool all_symbols = std::all_of(
+            $3.begin(), 
+            $3.end(), 
+            [](const Operand& op) {
+              return std::holds_alternative<std::string>(op);
+            }
+          );
+
+          if(!all_symbols) {
+            error("extern directive requires all of its operands to be strings!");
+          }
+
+          // TODO
+        }
+        else if ($2 == "word") {
+          // TODO
+        }
+        else if ($2 == "skip") {
+          if($3.size() != 1)
+            error("skip directive usage: .skip <literal>");
+
+          // checking if the type of operand is a number
+          if(auto* literal = std::get_if<std::uint32_t>(&($3.back()))) {
+            // TODO
+          }
+          else 
+            error("skip operand <literal> must be a number!");
+        }
+        else if ($2 == "equ") {
+          // LEVEL C, do last, probably will have its own rule, like .ascii
+          cout << ".equ is level C, will finish later" << endl;
+        }
+        else {
+          error("unknown directive ." + $2);
+        }
+      }
+  | DOT IDENT STRING 
+      { 
+        if ($2 == "ascii") {
+          // TODO
+        }
+        else error("unknown directive ." + $2);
+      }
+  ;
+/* used for directives */
+operand_list
+  : IDENT
+      {
+        /* first argument */
+        $$ = OperandList{ $1 };
+      }
+  | NUMBER 
+      {
+        /* first argument */
+        $$ = OperandList{ $1 };
+      }
+  | operand_list COMMA IDENT 
+      {
+        /* other arguments */
+        $$ = std::move($1);
+        $$.push_back($3);
+
+      }
+  | operand_list COMMA NUMBER
+      {
+        /* other arguments */
+        $$ = std::move($1);
+        $$.push_back($3);
       }
   ;
 
-/* instruction -> IDENT   (halt)                                           */
+/* instruction -> IDENT (halt) */
 instruction
   : IDENT
       {
-        if (strcmp($1, "halt") == 0)
+        if ($1 == "halt")
           cout << "instruction halt\n";
         else
-          yyerror(assembler ,("unknown instruction " + string($1)).c_str());
-        free($1);
+          error("unknown instruction " + $1);
       }
   ;
 
 %%
 
-int main(int argc, char** argv) {
-  if (argc > 1) {
-    yyin = fopen(argv[1], "r");
-    if (!yyin) { cerr << "cannot open " << argv[1] << "\n"; return 1; }
-  }
-  Assembler as;
-  return yyparse(as);  /* reads yyin (defaults to stdin if no file given) */
-}
-
-void yyerror(Assembler &assembler, const char* s) {
-  cerr << "parse error: " << s << "\n";
+void yy::parser::error(const std::string &msg) {
+  cerr << "parse error: " << msg << "\n";
   exit(1);
 }

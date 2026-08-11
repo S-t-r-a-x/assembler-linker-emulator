@@ -5,8 +5,8 @@
 *.d
 /bin/
 
-# misc/ scratch parsers: all generated + built output lands here
-misc/build/
+# flex/bison generated output lands here
+/build/
 
 # flex-generated
 *.yy.*

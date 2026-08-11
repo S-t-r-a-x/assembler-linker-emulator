@@ -1,8 +1,44 @@
+#include <cstdio>
+#include <cstring>
 #include <iostream>
-#include <vector>
+#include "assembler.hpp"
+#include "parser.tab.h"
 
-int main(void)
-{
-    std::cout << "Hello World from main!" << std::endl;
-    return 0;
+extern FILE* yyin;
+
+int main(int argc, char** argv) {
+    const char* inputPath = nullptr;
+    const char* outputPath = nullptr;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "-o") == 0) {
+            if (i + 1 >= argc) {
+                std::cerr << "asembler: -o requires an argument\n";
+                return 1;
+            }
+            outputPath = argv[++i];
+        } else {
+            inputPath = argv[i];
+        }
+    }
+
+    // Both are required: the Assembler ctor takes std::string, and
+    // constructing one from a null char* throws instead of erroring cleanly.
+    if (!inputPath || !outputPath) {
+        std::cerr << "usage: asembler -o <output> <input>\n";
+        return 1;
+    }
+
+    yyin = fopen(inputPath, "r");
+    if (!yyin) {
+        std::cerr << "asembler: cannot open " << inputPath << "\n";
+        return 1;
+    }
+
+    Assembler assembler(outputPath);
+    yy::parser parser(assembler);
+    int result = parser.parse();
+    fclose(yyin);
+
+    return result;
 }
