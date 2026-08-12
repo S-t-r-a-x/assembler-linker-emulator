@@ -63,6 +63,8 @@ public:
 
     void openSection(const std::string &sectionName);
     
+    void declareGlobal(const std::string &symbolName);
+    
 private:
     std::vector<SymTab_entry> symTab;
     unsigned int locationCounter;

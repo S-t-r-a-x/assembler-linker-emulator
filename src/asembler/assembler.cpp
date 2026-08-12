@@ -30,3 +30,7 @@ void Assembler::openSection(const std::string &sectionName) {
     // set current section - important
     currentSection = num;
 }
+
+void Assembler::declareGlobal(const std::string &symbolName) {
+    symTab[getOrCreateSymbol(symbolName)].bind = Bind::GLOB;
+}

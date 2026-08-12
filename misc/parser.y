@@ -96,6 +96,9 @@ directive
           }
 
           // TODO
+          for(const Operand &symbol : $3) {
+            assembler.declareGlobal(std::get<std::string>(symbol));
+          }
         }
         else if ($2 == "extern") {
           // checking if all elements in the vector are strings
