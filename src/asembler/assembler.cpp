@@ -1,13 +1,32 @@
-#include <iostream>
 #include "../../inc/assembler.hpp"
 
-void Assembler::addToSymbolTable(SymTab_entry entry) {
-        symTab.push_back(entry);
+unsigned short Assembler::findByName(const std::string &entryName) const {
+    for (const SymTab_entry& entry : symTab) {
+        if (entry.name == entryName)
+            return entry.num;
+    }
+    return 0;
 }
 
-void Assembler::openSection(std::string sectionName) {
-    unsigned short index = symTab.size();
-    addToSymbolTable({index, 0x0, Type::SCTN, Bind::LOC, index, sectionName});
-    currentSection = index;
-    std::cout << "Opening directive!" << std::endl; 
+unsigned short Assembler::getOrCreateSymbol(const std::string &symbolName) {
+    unsigned short num = findByName(symbolName);
+    if (!num) {
+        // no entry found, have to create one
+        num = symTab.size();
+        symTab.push_back(SymTab_entry(num, symbolName));
+    }
+    return num;
+}
+
+void Assembler::openSection(const std::string &sectionName) {
+    unsigned short num = getOrCreateSymbol(sectionName);
+    // setup section
+    SymTab_entry &sectionEntry = symTab[num];
+    sectionEntry.value = 0;
+    sectionEntry.type = Type::SCTN;
+    sectionEntry.bind = Bind::LOC;
+    sectionEntry.ndx = num;
+    // TODO - reset location counter - here or in getOrCreateSymbol
+    // set current section - important
+    currentSection = num;
 }

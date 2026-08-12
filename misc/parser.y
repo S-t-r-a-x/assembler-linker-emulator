@@ -140,7 +140,8 @@ directive
         if ($2 == "ascii") {
           // TODO
         }
-        else error("unknown directive ." + $2);
+        else 
+          error("unknown directive ." + $2);
       }
   ;
 /* used for directives */
