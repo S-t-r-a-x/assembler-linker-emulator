@@ -41,7 +41,6 @@ program
 line
   : EOL
   | statement EOL
-  | statement
   ;
 
 /* statement -> directive | instruction */
@@ -95,7 +94,6 @@ directive
             error("global directive requires all of its operands to be strings!");
           }
 
-          // TODO
           for(const Operand &symbol : $3) {
             assembler.declareGlobal(std::get<std::string>(symbol));
           }
@@ -114,7 +112,9 @@ directive
             error("extern directive requires all of its operands to be strings!");
           }
 
-          // TODO
+          for(const Operand &symbol : $3) {
+            assembler.declareExtern(std::get<std::string>(symbol));
+          }
         }
         else if ($2 == "word") {
           // TODO

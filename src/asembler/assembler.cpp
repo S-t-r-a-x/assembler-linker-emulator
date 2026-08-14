@@ -32,5 +32,11 @@ void Assembler::openSection(const std::string &sectionName) {
 }
 
 void Assembler::declareGlobal(const std::string &symbolName) {
+    // TODO maybe, add guard check for SCTN type
+    symTab[getOrCreateSymbol(symbolName)].bind = Bind::GLOB;
+}
+
+void Assembler::declareExtern(const std::string &symbolName) {
+    // TODO maybe, add guard check for SCTN type
     symTab[getOrCreateSymbol(symbolName)].bind = Bind::GLOB;
 }
