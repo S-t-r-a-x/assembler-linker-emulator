@@ -8,6 +8,9 @@
   #include <variant>
   #include <vector>
   #include <algorithm>
+
+  using Operand = std::variant<std::uint32_t, std::string>;
+  using OperandList = std::vector<Operand>;
 }
 
 %{
@@ -41,6 +44,8 @@ program
 line
   : EOL
   | statement EOL
+  | label EOL
+  | label statement EOL
   ;
 
 /* statement -> directive | instruction */
@@ -174,6 +179,12 @@ operand_list
       }
   ;
 
+label
+  : IDENT COLON
+      {
+        assembler.defineLabel($1);
+      }
+  ;
 /* instruction -> IDENT (halt) */
 instruction
   : IDENT

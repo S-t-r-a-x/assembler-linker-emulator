@@ -22,57 +22,86 @@ enum class Bind {
     GLOB 
 };
 
+using SymIndex = unsigned short;
+// probably do something like 
+// using Literal = std::uint32_t;
+static constexpr SymIndex UND = 0;
+constexpr SymIndex ABS = USHRT_MAX;
+
 struct SymTab_entry {
-    /*  Symbol table entry */
-    // Constants, used on ndx
-    static constexpr unsigned short UND = 0;
-    static constexpr unsigned short ABS = USHRT_MAX; // just gotta care not to hit this value but that shouldnt be a problem
-    // Fields: Num Value Type Bind Ndx Name
-    unsigned short num = 0;       // index in the symbol table
-    unsigned int value = 0;     // offset within its section (0 for undefined or section)
+    /*  Symbol table entry */    
+    SymIndex index = 0;                     // index in the symbol table
+    unsigned int value = 0;                 // offset within its section (0 for undefined or section)
     Type type = Type::NOTYP;              
     Bind bind = Bind::LOC;              
-    unsigned short ndx = UND;     // num of the section it belongs to (can be UND or ABS)
+    SymIndex section_index = UND;    // index of the section it belongs to (can be NO_SECTION or ABS)
     std::string name;       
-
-    SymTab_entry(unsigned short num, const std::string &name) {
-        this->num = num;
+    bool is_defined = false;                           // for forward declarations 
+    bool is_extern = false;
+ 
+    SymTab_entry(unsigned short index, const std::string &name) {
+        this->index = index;
         this->name = name;
     }
 };
 
-// Directive relevant
-using Operand = std::variant<std::uint32_t, std::string>;
-using OperandList = std::vector<Operand>;
+static constexpr SymIndex NO_SECTION = UND;
+
+struct Section {
+    SymIndex symTab_index;
+    std::vector<std::uint8_t> bytes;
+
+    explicit Section (SymIndex symTab_index) {
+        this->symTab_index = symTab_index;
+    }
+
+    std::uint32_t getLocationCounter() const { return bytes.size(); }
+};
+
 
 class Assembler {
 public:
-    Assembler(std::string writePath) {
-        this->writePath = writePath;
+    Assembler(std::string write_path) {
+        this->write_path = write_path;
 
         // first entry in the symbol table - null entry, represents no symbol
-        SymTab_entry &nullEntry = symTab[getOrCreateSymbol("")];
+        SymTab_entry &nullEntry = symbol_table[getOrCreateSymbol("")];
         nullEntry.value = 0;
         nullEntry.type = Type::NOTYP;
         nullEntry.bind = Bind::LOC;
-        nullEntry.ndx = SymTab_entry::UND;
-
-        currentSection = SymTab_entry::UND;
-        locationCounter = 0;
+        nullEntry.section_index = NO_SECTION;
+        
+        current_section = NO_SECTION;
     }
 
-    void openSection(const std::string &sectionName);
+    void openSection(const std::string &section_name);
     
-    void declareGlobal(const std::string &symbolName);
+    void declareGlobal(const std::string &symbol_name);
 
-    void declareExtern(const std::string &symbolName);
+    void declareExtern(const std::string &symbol_name);
+
+    void defineLabel(const std::string &label_name);
+
+    bool assemblerFinishedCorrectly() const { return error_count == 0; }
 
 private:
-    std::vector<SymTab_entry> symTab;
-    unsigned int locationCounter;
-    unsigned short currentSection; // where we are now, for adding symbols
-    std::string writePath; // output file location
+    std::vector<SymTab_entry> symbol_table;
+    std::vector<Section> section_table;
+    SymIndex current_section; // index of the current section in the symbol table
+    std::string write_path; // output file location
 
-    unsigned short findByName(const std::string &entryName) const;
-    unsigned short getOrCreateSymbol(const std::string &symbolName);
+    // Symbol table
+    SymIndex findSymbolByName(const std::string &entry_name) const;
+    SymIndex getOrCreateSymbol(const std::string &symbol_name);
+
+    // Section table
+    Section *findSection(SymIndex symTab_index);
+    
+    // emitting content into sections
+    void emitByte(std::uint8_t byte);
+    void emitWord(std::uint32_t word); // little-endian, data only, instructions are not in little-endian order
+
+    // error handling
+    unsigned int error_count = 0;
+    void error(const std::string &error_msg);
 };
