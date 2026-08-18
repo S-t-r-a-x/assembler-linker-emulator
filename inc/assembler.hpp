@@ -23,8 +23,10 @@ enum class Bind {
 };
 
 using SymIndex = unsigned short;
+using RegIndex = std::uint8_t;     // 0..15
+using Literal = std::uint32_t;     
+using Displacement = std::int32_t; // SIGNED
 // probably do something like 
-// using Literal = std::uint32_t;
 static constexpr SymIndex UND = 0;
 constexpr SymIndex ABS = USHRT_MAX;
 
@@ -94,7 +96,13 @@ public:
 
     void emitZeros(std::uint32_t number_of_zeros);
 
-    // .end - nothing follows, so this is where the object file gets written
+    void emitInstruction(std::uint8_t oc, 
+                        std::uint8_t mod,
+                        RegIndex regA, 
+                        RegIndex regB, 
+                        RegIndex regC,
+                        Displacement disp);
+        // .end - nothing follows, so this is where the object file gets written
     void endAssembly();
 
     bool hadError() const { return error_count > 0; }

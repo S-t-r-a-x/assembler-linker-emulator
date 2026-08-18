@@ -26,9 +26,12 @@
 %parse-param { Assembler &assembler }
 
 /* Value carried by tokens/nonterminals. */
-%token DOT COMMA EOL COLON
+%token DOT COMMA EOL COLON DOLLAR LBRACKET RBRACKET PLUS
 %token <std::string> IDENT STRING
-%token <std::uint32_t> NUMBER
+
+%token <std::uint32_t> NUMBER REGISTER CSR
+
+%token UNKNOWN
 
 %type <OperandList> operand_list
 

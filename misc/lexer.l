@@ -30,6 +30,39 @@
                               yylval->emplace<std::string>(yytext + 1, yyleng - 2); 
                               return yy::parser::token::STRING; 
                             }
+
+%r(1[0-5]|[0-9])            {
+                              yylval->emplace<std::uint32_t>(strtoul(yytext + 2, nullptr, 10));
+                              return yy::parser::token::REGISTER;
+                            }
+%sp                         { 
+                              yylval->emplace<std::uint32_t>(14); 
+                              return yy::parser::token::REGISTER; 
+                            }
+%pc                         { 
+                              yylval->emplace<std::uint32_t>(15); 
+                              return yy::parser::token::REGISTER; 
+                            }
+
+%status                     { 
+                              yylval->emplace<std::uint32_t>(0); 
+                              return yy::parser::token::CSR; 
+                            }
+%handler                    { 
+                              yylval->emplace<std::uint32_t>(1); 
+                              return yy::parser::token::CSR; 
+                            }
+%cause                      { 
+                              yylval->emplace<std::uint32_t>(2); 
+                              return yy::parser::token::CSR; 
+                            }
+
+%[a-zA-Z_][a-zA-Z0-9_]*     { return yy::parser::token::UNKNOWN; }
+
+\$                          { return yy::parser::token::DOLLAR; }
+\[                          { return yy::parser::token::LBRACKET; }
+\]                          { return yy::parser::token::RBRACKET; }
+\+                          { return yy::parser::token::PLUS; }
 ,                           { return yy::parser::token::COMMA; }
 :                           { return yy::parser::token::COLON; }
 .                           ; /* ignore unknown chars for now */

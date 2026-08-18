@@ -119,6 +119,33 @@ void Assembler::emitWord(std::uint32_t word) {
     }
 }
 
+void Assembler::emitInstruction(std::uint8_t oc,
+                                std::uint8_t mod,
+                                RegIndex regA,
+                                RegIndex regB,
+                                RegIndex regC,
+                                Displacement disp) {
+    std::uint32_t instruction_word = 
+      (std::uint32_t(oc & 0xF) << 28) 
+    | (std::uint32_t(mod & 0xF) << 24) 
+    | (std::uint32_t(regA & 0xF) << 20) 
+    | (std::uint32_t(regB & 0xF) << 16) 
+    | (std::uint32_t(regC & 0xF) << 12) 
+    | (std::uint32_t(disp) & 0xFFF);
+
+    Section *section = findSection(current_section);
+    if (section == nullptr) {
+        error("No section to emit instruction into!");
+        return;
+    }
+
+    std::uint8_t instruction_byte;
+    for (int i = 0; i < 4; i++) {
+        instruction_byte = instruction_word >> (32 - 8*(i+1));
+        section->bytes.push_back(instruction_byte);
+    }
+}
+
 void Assembler::emitZeros(std::uint32_t number_of_zeros) {
     Section *section = findSection(current_section);
     if (section == nullptr) {
