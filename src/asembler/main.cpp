@@ -38,8 +38,8 @@ int main(int argc, char** argv) {
     Assembler assembler(outputPath);
     yy::parser parser(assembler);
     int parser_result = parser.parse();
-    bool assembler_finished_correctly = assembler.assemblerFinishedCorrectly();
+    bool assembler_had_error = assembler.hadError();
     fclose(yyin);
 
-    return parser_result || assembler_finished_correctly;
+    return parser_result || assembler_had_error;
 }

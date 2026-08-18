@@ -4,7 +4,7 @@
 // the Makefile passes the flag. Fail loudly if it ever goes missing, rather
 // than with pages of template errors from std::variant below.
 static_assert(__cplusplus >= 201703L,
-              "This project requires C++17 -- build with -std=c++17");
+              "This project requires C++17, build with -std=c++17");
 
 #include <climits>
 #include <string>
@@ -45,11 +45,18 @@ struct SymTab_entry {
     }
 };
 
+struct Reloc {
+    std::uint32_t offset;
+    std::uint32_t addend;
+    SymIndex symbol;
+};
+
 static constexpr SymIndex NO_SECTION = UND;
 
 struct Section {
     SymIndex symTab_index;
     std::vector<std::uint8_t> bytes;
+    std::vector<Reloc> relocs;
 
     explicit Section (SymIndex symTab_index) {
         this->symTab_index = symTab_index;
@@ -57,7 +64,6 @@ struct Section {
 
     std::uint32_t getLocationCounter() const { return bytes.size(); }
 };
-
 
 class Assembler {
 public:
@@ -73,6 +79,10 @@ public:
         
         current_section = NO_SECTION;
     }
+    
+    void handleWordSymbol(const std::string &symbol_name);
+
+    void handleWordLiteral(const std::uint32_t literal);
 
     void openSection(const std::string &section_name);
     
@@ -82,7 +92,12 @@ public:
 
     void defineLabel(const std::string &label_name);
 
-    bool assemblerFinishedCorrectly() const { return error_count == 0; }
+    void emitZeros(std::uint32_t number_of_zeros);
+
+    // .end - nothing follows, so this is where the object file gets written
+    void endAssembly();
+
+    bool hadError() const { return error_count > 0; }
 
 private:
     std::vector<SymTab_entry> symbol_table;
@@ -99,7 +114,18 @@ private:
     
     // emitting content into sections
     void emitByte(std::uint8_t byte);
-    void emitWord(std::uint32_t word); // little-endian, data only, instructions are not in little-endian order
+    // little-endian, data only, instructions are not in little-endian order
+    void emitWord(std::uint32_t word); 
+
+    // records an R_32 relocation for the 4 bytes about to be emitted, must be called before the emit because it reads the location counter
+    void relocateAgainst(SymIndex symbol_index);
+
+    // called at .end to rewrite every record that turned out to reference a symbol defined in this file to point at that symbol's section instead. 
+    // cannot be decided when the record is created, because a forward reference still looks undefined at that point.
+    void resolveRelocs();
+
+    // output
+    void writeObjectFile();
 
     // error handling
     unsigned int error_count = 0;

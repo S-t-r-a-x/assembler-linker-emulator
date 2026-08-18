@@ -66,8 +66,7 @@ directive
   : DOT IDENT
       {
         if ($2 == "end") {
-          // TODO
-          cout << "directive .end\n";
+          assembler.endAssembly();
         }
         else {
           error("unknown directive ." + $2);
@@ -122,7 +121,12 @@ directive
           }
         }
         else if ($2 == "word") {
-          // TODO
+          for(const Operand &symbol : $3) {
+            if(std::holds_alternative<std::string>(symbol)) 
+              assembler.handleWordSymbol(std::get<std::string>(symbol));
+            else
+              assembler.handleWordLiteral(std::get<std::uint32_t>(symbol));
+          }
         }
         else if ($2 == "skip") {
           if($3.size() != 1)
@@ -131,6 +135,7 @@ directive
           // checking if the type of operand is a number
           if(auto* literal = std::get_if<std::uint32_t>(&($3.back()))) {
             // TODO
+            assembler.emitZeros(*literal);
           }
           else 
             error("skip operand <literal> must be a number!");
