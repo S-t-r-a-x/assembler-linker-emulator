@@ -24,21 +24,28 @@ enum class Bind {
 
 using SymIndex = unsigned short;
 using RegIndex = std::uint8_t;     // 0..15
-using Literal = std::uint32_t;     
+using Literal = std::uint32_t;
 using Displacement = std::int32_t; // SIGNED
-// probably do something like 
+
+// The two general purpose registers with a second name in the ISA.
+// Stack grows downwards, and SP points ot the adress of the occupied adress at the top of the stack
+constexpr RegIndex SP = 14;
+constexpr RegIndex PC = 15;
+// CSR indices: status is 0, handler is 1, cause is 2.
+constexpr RegIndex CSR_STATUS = 0;
+
 static constexpr SymIndex UND = 0;
 constexpr SymIndex ABS = USHRT_MAX;
 
 struct SymTab_entry {
     /*  Symbol table entry */    
-    SymIndex index = 0;                     // index in the symbol table
-    unsigned int value = 0;                 // offset within its section (0 for undefined or section)
+    SymIndex index = 0;             // index in the symbol table
+    unsigned int value = 0;         // offset within its section (0 for undefined or section)
     Type type = Type::NOTYP;              
     Bind bind = Bind::LOC;              
-    SymIndex section_index = UND;    // index of the section it belongs to (can be NO_SECTION or ABS)
+    SymIndex section_index = UND;   // index of the section it belongs to (can be NO_SECTION or ABS)
     std::string name;       
-    bool is_defined = false;                           // for forward declarations 
+    bool is_defined = false;        // for forward declarations 
     bool is_extern = false;
  
     SymTab_entry(unsigned short index, const std::string &name) {
@@ -82,27 +89,31 @@ public:
         current_section = NO_SECTION;
     }
     
+    // Directive handlers
     void handleWordSymbol(const std::string &symbol_name);
-
     void handleWordLiteral(const std::uint32_t literal);
-
     void openSection(const std::string &section_name);
-    
     void declareGlobal(const std::string &symbol_name);
-
     void declareExtern(const std::string &symbol_name);
-
     void defineLabel(const std::string &label_name);
-
     void emitZeros(std::uint32_t number_of_zeros);
 
-    void emitInstruction(std::uint8_t oc, 
+    void emitInstruction(std::uint8_t oc,
                         std::uint8_t mod,
-                        RegIndex regA, 
-                        RegIndex regB, 
+                        RegIndex regA,
+                        RegIndex regB,
                         RegIndex regC,
                         Displacement disp);
-        // .end - nothing follows, so this is where the object file gets written
+
+    // Handlers for instructions whose operands are registers only,
+    // so nothing here needs a displacement resolved, a literal pool slot or a relocation.
+    void instructionNoOperand(const std::string &mnemonic);
+    void instructionOneRegister(const std::string &mnemonic, RegIndex reg);
+    void instructionTwoRegisters(const std::string &mnemonic, RegIndex src, RegIndex dst);
+    void instructionCsrRead(const std::string &mnemonic, RegIndex csr, RegIndex gpr);
+    void instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, RegIndex csr);
+    
+    // .end - nothing follows, so this is where the object file gets written
     void endAssembly();
 
     bool hadError() const { return error_count > 0; }

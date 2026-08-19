@@ -193,15 +193,18 @@ label
         assembler.defineLabel($1);
       }
   ;
-/* instruction -> IDENT (halt) */
+
 instruction
-  : IDENT
-      {
-        if ($1 == "halt")
-          cout << "instruction halt\n";
-        else
-          error("unknown instruction " + $1);
-      }
+  : IDENT                            /* halt, int, ret, iret */
+      { assembler.instructionNoOperand($1); }
+  | IDENT REGISTER                   /* push, pop, not */
+      { assembler.instructionOneRegister($1, $2); }
+  | IDENT REGISTER COMMA REGISTER    /* xchg, add, sub, mul, div, and, or, xor, shl, shr */
+      { assembler.instructionTwoRegisters($1, $2, $4); }
+  | IDENT CSR COMMA REGISTER         /* csrrd %csr, %gpr */
+      { assembler.instructionCsrRead($1, $2, $4); }
+  | IDENT REGISTER COMMA CSR         /* csrwr %gpr, %csr */
+      { assembler.instructionCsrWrite($1, $2, $4); }
   ;
 
 %%

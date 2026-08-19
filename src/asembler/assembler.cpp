@@ -146,6 +146,85 @@ void Assembler::emitInstruction(std::uint8_t oc,
     }
 }
 
+void Assembler::instructionNoOperand(const std::string &mnemonic) {
+    if (mnemonic == "halt")
+        emitInstruction(0x0, 0x0, 0, 0, 0, 0);
+    else if (mnemonic == "int")
+        emitInstruction(0x1, 0x0, 0, 0, 0, 0);
+    else if (mnemonic == "ret")
+        // pop pc
+        emitInstruction(0x9, 0x3, PC, SP, 0, 4);
+    else if (mnemonic == "iret") {
+        // pop pc -> pop status cannot be done in that order because restoring pc first
+        // would jump to a different instruction before pop status runs. Implemented to status out of
+        // [sp + 4] without touching sp, then let the pc load pop both words at once.
+        emitInstruction(0x9, 0x6, CSR_STATUS, SP, 0, 4); // csr[A] <= mem32[gpr[B] + gpr[C] + D]
+        emitInstruction(0x9, 0x3, PC, SP, 0, 8);         // gpr[A] <= mem32[gpr[B]]; gpr[B] += D
+    }
+    else
+        error("unknown instruction: " + mnemonic);
+}
+
+void Assembler::instructionOneRegister(const std::string &mnemonic, RegIndex reg) {
+    if (mnemonic == "push")
+        // sp <= sp - 4; mem32[sp] <= reg, which is st with MOD 0001
+        emitInstruction(0x8, 0x1, SP, 0, reg, -4);
+    else if (mnemonic == "pop")
+        // reg <= mem32[sp]; sp <= sp + 4, which is ld with MOD 0011
+        emitInstruction(0x9, 0x3, reg, SP, 0, 4);
+    else if (mnemonic == "not")
+        emitInstruction(0x6, 0x0, reg, reg, 0, 0);
+    else
+        error("unknown instruction, or wrong operands for it: " + mnemonic);
+}
+
+void Assembler::instructionTwoRegisters(const std::string &mnemonic, RegIndex src, RegIndex dst) {
+    // Format for all of these is "dst <= dst op src" in assembly
+    // gpr[A] <= gpr[B] op gpr[C], which means that A and B are both dst, and C is src.
+    if (mnemonic == "add")
+        emitInstruction(0x5, 0x0, dst, dst, src, 0);
+    else if (mnemonic == "sub")
+        emitInstruction(0x5, 0x1, dst, dst, src, 0);
+    else if (mnemonic == "mul")
+        emitInstruction(0x5, 0x2, dst, dst, src, 0);
+    else if (mnemonic == "div")
+        emitInstruction(0x5, 0x3, dst, dst, src, 0);
+    else if (mnemonic == "and")
+        emitInstruction(0x6, 0x1, dst, dst, src, 0);
+    else if (mnemonic == "or")
+        emitInstruction(0x6, 0x2, dst, dst, src, 0);
+    else if (mnemonic == "xor")
+        emitInstruction(0x6, 0x3, dst, dst, src, 0);
+    else if (mnemonic == "shl")
+        emitInstruction(0x7, 0x0, dst, dst, src, 0);
+    else if (mnemonic == "shr")
+        emitInstruction(0x7, 0x1, dst, dst, src, 0);
+    else if (mnemonic == "xchg")
+        emitInstruction(0x4, 0x0, 0, src, dst, 0);
+    else
+        error("unknown instruction, or wrong operands for it: " + mnemonic);
+}
+
+void Assembler::instructionCsrRead(const std::string &mnemonic, RegIndex csr, RegIndex gpr) {
+    if (mnemonic != "csrrd") {
+        error("unknown instruction, or wrong operands for it: " + mnemonic);
+        return;
+    }
+
+    // ld with MOD 0000: gpr[A] <= csr[B]
+    emitInstruction(0x9, 0x0, gpr, csr, 0, 0);
+}
+
+void Assembler::instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, RegIndex csr) {
+    if (mnemonic != "csrwr") {
+        error("unknown instruction, or wrong operands for it: " + mnemonic);
+        return;
+    }
+
+    // ld with MOD 0100: csr[A] <= gpr[B]
+    emitInstruction(0x9, 0x4, csr, gpr, 0, 0);
+}
+
 void Assembler::emitZeros(std::uint32_t number_of_zeros) {
     Section *section = findSection(current_section);
     if (section == nullptr) {
