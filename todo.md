@@ -17,3 +17,4 @@
   caught: `defineLabel` ignores `is_extern`, `declareExtern` ignores `is_defined`.
 - Not urgent: nothing reads `is_extern` until relocations land.
 - Once decided, move the resolution to `assumptions.md`.
+- Introduce Byte for std::uint8_t and Word for std::uint32_t and refactor the code so it uses the new types, for readability

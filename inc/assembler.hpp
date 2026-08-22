@@ -24,7 +24,6 @@ enum class Bind {
 
 using SymIndex = unsigned short;
 using RegIndex = std::uint8_t;     // 0..15
-using Literal = std::uint32_t;
 using Displacement = std::int32_t; // SIGNED
 
 // The two general purpose registers with a second name in the ISA.
@@ -55,9 +54,9 @@ struct SymTab_entry {
 };
 
 struct Reloc {
-    std::uint32_t offset;
-    std::uint32_t addend;
-    SymIndex symbol;
+    std::uint32_t offset;   // offset from section start to the hole that needs to be patched up
+    std::uint32_t addend;   // A - the offset of the symbol that needs to be relocated from the section start
+    SymIndex symbol;        // S - the symbol being relocated against
 };
 
 static constexpr SymIndex NO_SECTION = UND;
@@ -72,6 +71,36 @@ struct Section {
     }
 
     std::uint32_t getLocationCounter() const { return bytes.size(); }
+};
+
+// Shared with the emulator, which decodes the same field. Cast unsigned values with
+// static_cast<Displacement> first: the field is sign extended when executed, so
+// 0xFFFFFEFE is -258 and does fit.
+constexpr Displacement DISPLACEMENT_MIN = -2048;
+constexpr Displacement DISPLACEMENT_MAX = 2047;
+
+constexpr bool fitsInDisplacement(Displacement disp) {
+    return disp >= DISPLACEMENT_MIN && disp <= DISPLACEMENT_MAX;
+}
+
+// Jump instructions accept only MemoryLiteral / MemorySymbol
+enum class InstructionOperandKind {
+    ImmediateLiteral,       // $<literal>          - the literal itself
+    ImmediateSymbol,        // $<simbol>           - the symbol's value
+    MemoryLiteral,          // <literal>           - memory at address <literal>
+    MemorySymbol,           // <simbol>            - memory at address <simbol>
+    RegisterDirect,         // %<reg>              - the register's value
+    RegisterIndirect,       // [%<reg>]            - memory at address <reg>
+    RegisterLiteralOffset,  // [%<reg> + <literal>] - memory at <reg> + <literal>
+    RegisterSymbolOffset    // [%<reg> + <simbol>]  - memory at <reg> + <simbol>
+};
+
+// Which fields carry meaning depends on kind.
+struct InstructionOperand {
+    InstructionOperandKind kind;
+    RegIndex reg = 0;
+    std::uint32_t literal = 0;
+    std::string symbol;
 };
 
 class Assembler {
@@ -105,16 +134,20 @@ public:
                         RegIndex regC,
                         Displacement disp);
 
-    // Handlers for instructions whose operands are registers only,
-    // so nothing here needs a displacement resolved, a literal pool slot or a relocation.
+    // Handlers for instructions with register only operands. No displacement to resolve, no pool slot, no relocation.
     void instructionNoOperand(const std::string &mnemonic);
     void instructionOneRegister(const std::string &mnemonic, RegIndex reg);
     void instructionTwoRegisters(const std::string &mnemonic, RegIndex src, RegIndex dst);
     void instructionCsrRead(const std::string &mnemonic, RegIndex csr, RegIndex gpr);
     void instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, RegIndex csr);
     
-    // .end - nothing follows, so this is where the object file gets written
-    void endAssembly();
+    void instructionLoad(const std::string &mnemonic, const InstructionOperand &operand, RegIndex gpr);
+    void instructionStore(const std::string &mnemonic, RegIndex gpr, const InstructionOperand &operand);
+
+    // temporary, until the addressing modes are encoded
+    void instructionUnimplemented(const std::string &mnemonic, const InstructionOperand &operand);
+
+    void endAssembly(); // .end - writes the object file
 
     bool hadError() const { return error_count > 0; }
 
@@ -130,6 +163,10 @@ private:
 
     // Section table
     Section *findSection(SymIndex symTab_index);
+
+    // [%reg + symbol] needs the symbol's *final* value at assembly time, which only an
+    // absolute symbol (declared via .equ) has. Errors and returns false otherwise.
+    bool displacementFromSymbol(const std::string &symbol_name, Displacement &disp);
     
     // emitting content into sections
     void emitByte(std::uint8_t byte);
@@ -139,8 +176,7 @@ private:
     // records an R_32 relocation for the 4 bytes about to be emitted, must be called before the emit because it reads the location counter
     void relocateAgainst(SymIndex symbol_index);
 
-    // called at .end to rewrite every record that turned out to reference a symbol defined in this file to point at that symbol's section instead. 
-    // cannot be decided when the record is created, because a forward reference still looks undefined at that point.
+    // called at .end
     void resolveRelocs();
 
     // output

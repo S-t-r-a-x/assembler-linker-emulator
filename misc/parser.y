@@ -9,8 +9,8 @@
   #include <vector>
   #include <algorithm>
 
-  using Operand = std::variant<std::uint32_t, std::string>;
-  using OperandList = std::vector<Operand>;
+  using DirectiveOperand = std::variant<std::uint32_t, std::string>;
+  using DirectiveOperandList = std::vector<DirectiveOperand>;
 }
 
 %{
@@ -33,7 +33,8 @@
 
 %token UNKNOWN
 
-%type <OperandList> operand_list
+%type <DirectiveOperandList> operand_list
+%type <InstructionOperand> operand
 
 %%
 
@@ -92,7 +93,7 @@ directive
           bool all_symbols = std::all_of(
             $3.begin(), 
             $3.end(), 
-            [](const Operand& op) {
+            [](const DirectiveOperand& op) {
               return std::holds_alternative<std::string>(op);
             }
           );
@@ -101,7 +102,7 @@ directive
             error("global directive requires all of its operands to be strings!");
           }
 
-          for(const Operand &symbol : $3) {
+          for(const DirectiveOperand &symbol : $3) {
             assembler.declareGlobal(std::get<std::string>(symbol));
           }
         }
@@ -110,7 +111,7 @@ directive
           bool all_symbols = std::all_of(
             $3.begin(), 
             $3.end(), 
-            [](const Operand& op) {
+            [](const DirectiveOperand& op) {
               return std::holds_alternative<std::string>(op);
             }
           );
@@ -119,12 +120,12 @@ directive
             error("extern directive requires all of its operands to be strings!");
           }
 
-          for(const Operand &symbol : $3) {
+          for(const DirectiveOperand &symbol : $3) {
             assembler.declareExtern(std::get<std::string>(symbol));
           }
         }
         else if ($2 == "word") {
-          for(const Operand &symbol : $3) {
+          for(const DirectiveOperand &symbol : $3) {
             if(std::holds_alternative<std::string>(symbol)) 
               assembler.handleWordSymbol(std::get<std::string>(symbol));
             else
@@ -165,12 +166,12 @@ operand_list
   : IDENT
       {
         /* first argument */
-        $$ = OperandList{ $1 };
+        $$ = DirectiveOperandList{ $1 };
       }
   | NUMBER 
       {
         /* first argument */
-        $$ = OperandList{ $1 };
+        $$ = DirectiveOperandList{ $1 };
       }
   | operand_list COMMA IDENT 
       {
@@ -205,6 +206,37 @@ instruction
       { assembler.instructionCsrRead($1, $2, $4); }
   | IDENT REGISTER COMMA CSR         /* csrwr %gpr, %csr */
       { assembler.instructionCsrWrite($1, $2, $4); }
+  | IDENT operand                    /* jmp, call */
+      { assembler.instructionUnimplemented($1, $2); }
+  | IDENT operand COMMA REGISTER     /* ld <operand>, %gpr */
+      { assembler.instructionLoad($1, $2, static_cast<RegIndex>($4)); }
+  | IDENT REGISTER COMMA operand     /* st %gpr, <operand> */
+      { assembler.instructionStore($1, static_cast<RegIndex>($2), $4); }
+  | IDENT REGISTER COMMA REGISTER COMMA operand   /* beq, bne, bgt */
+      { assembler.instructionUnimplemented($1, $6); }
+  ;
+
+/* RegisterDirect is not here to avoid a reduce reduce conflict with the grammar rule for  instructions with 2 registers.
+ * As such, it is handled in instructionTwoRegisters.
+ */
+operand
+  : DOLLAR NUMBER
+      { $$ = InstructionOperand{ InstructionOperandKind::ImmediateLiteral, 0, $2, "" }; }
+  | DOLLAR IDENT
+      { $$ = InstructionOperand{ InstructionOperandKind::ImmediateSymbol, 0, 0, $2 }; }
+  | NUMBER
+      { $$ = InstructionOperand{ InstructionOperandKind::MemoryLiteral, 0, $1, "" }; }
+  | IDENT
+      { $$ = InstructionOperand{ InstructionOperandKind::MemorySymbol, 0, 0, $1 }; }
+  | LBRACKET REGISTER RBRACKET
+      { $$ = InstructionOperand{ InstructionOperandKind::RegisterIndirect,
+                                 static_cast<RegIndex>($2), 0, "" }; }
+  | LBRACKET REGISTER PLUS NUMBER RBRACKET
+      { $$ = InstructionOperand{ InstructionOperandKind::RegisterLiteralOffset,
+                                 static_cast<RegIndex>($2), $4, "" }; }
+  | LBRACKET REGISTER PLUS IDENT RBRACKET
+      { $$ = InstructionOperand{ InstructionOperandKind::RegisterSymbolOffset,
+                                 static_cast<RegIndex>($2), 0, $4 }; }
   ;
 
 %%

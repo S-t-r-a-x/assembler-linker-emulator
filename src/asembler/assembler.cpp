@@ -4,12 +4,9 @@
 #include <sstream>
 #include <iomanip>
 
-// Bytes per line in a SECTION block. Purely cosmetic - the reader tokenizes
-// with >>, so line breaks are whitespace to it - but it has to be a fixed rule
-// so that re-emitting a parsed object file reproduces it byte for byte.
+// Cosmetic, but must stay fixed so re-emitting a parsed object file reproduces it exactly.
 static constexpr std::size_t BYTES_PER_LINE = 16;
 
-// Fixed-width lowercase hex, so columns line up when eyeballing an object file.
 static std::string toHex(std::uint32_t value, int width) {
     std::ostringstream stream;
     stream << std::hex << std::setfill('0') << std::setw(width) << value;
@@ -201,6 +198,10 @@ void Assembler::instructionTwoRegisters(const std::string &mnemonic, RegIndex sr
         emitInstruction(0x7, 0x1, dst, dst, src, 0);
     else if (mnemonic == "xchg")
         emitInstruction(0x4, 0x0, 0, src, dst, 0);
+    else if (mnemonic == "ld" || mnemonic == "st")
+        // ld %rS, %rD and st %rS, %rD are the same token shape as add %rS, %rD, so they
+        // land here. Both mean dst <= src: gpr[A] <= gpr[B] + 0.
+        emitInstruction(0x9, 0x1, dst, src, 0, 0);
     else
         error("unknown instruction, or wrong operands for it: " + mnemonic);
 }
@@ -243,7 +244,7 @@ void Assembler::relocateAgainst(SymIndex symbol_index) {
         return;
     }
 
-    // Only record what was referenced. Whether the symbol is local or extern is not knowable yet, since a forward reference still looks undefined as we pass it, so resolveRelocs() makes that call at .end instead.
+    // Local vs extern is decided in resolveRelocs(), not here.
     Reloc reloc;
     reloc.offset = section->getLocationCounter(); // the hole starts where we are now
     reloc.symbol = symbol_index;
@@ -257,8 +258,9 @@ void Assembler::resolveRelocs() {
         for (Reloc &reloc : section.relocs) {
             const SymTab_entry &symbol = symbol_table[reloc.symbol];
 
-            // Extern keeps pointing at the symbol itself, since that one does survive linking. 
-            // An absolute symbol has no section to point at.
+            // Extern survives linking, absolute has no section: both stay as they are.
+            // If symbol is in the same file, then S is the section symbol which holds it, and its value will ultimately be the sections base address
+            // Otherwise, if the symbol that we need is extern, A = 0 and S will be the full resolved address of that symbol from the other file
             if (symbol.section_index == UND || symbol.section_index == ABS)
                 continue;
 
@@ -335,4 +337,147 @@ void Assembler::writeObjectFile() {
                 << toHex(reloc.addend, 8) << "\n";
         }
     }
+}
+
+static const char *operandKindName(InstructionOperandKind kind) {
+    switch (kind) {
+        case InstructionOperandKind::ImmediateLiteral: return "$<literal>";
+        case InstructionOperandKind::ImmediateSymbol:  return "$<symbol>";
+        case InstructionOperandKind::MemoryLiteral:    return "<literal>";
+        case InstructionOperandKind::MemorySymbol:     return "<symbol>";
+        case InstructionOperandKind::RegisterDirect:   return "%<reg>";
+        case InstructionOperandKind::RegisterIndirect: return "[%<reg>]";
+        case InstructionOperandKind::RegisterLiteralOffset:  return "[%<reg> + <literal>]";
+        case InstructionOperandKind::RegisterSymbolOffset:   return "[%<reg> + <symbol>]";
+    }
+    return "<unknown>";
+}
+
+bool Assembler::displacementFromSymbol(const std::string &symbol_name, Displacement &disp) {
+    SymIndex index = findSymbolByName(symbol_name);
+
+    if (index == UND || !symbol_table[index].is_defined) {
+        error("final value of " + symbol_name + " is not known at assembly time");
+        return false;
+    }
+    if (symbol_table[index].section_index != ABS) {
+        // Only a symbol produced by .equ has a value known at assembly time
+        error(symbol_name + " is not an absolute symbol, so it cannot be a displacement");
+        return false;
+    }
+
+    disp = static_cast<Displacement>(symbol_table[index].value);
+    if (!fitsInDisplacement(disp)) {
+        error("value of " + symbol_name + " does not fit in a 12 bit signed displacement");
+        return false;
+    }
+    return true;
+}
+
+void Assembler::instructionLoad(const std::string &mnemonic,
+                                const InstructionOperand &operand,
+                                RegIndex gpr) {
+    if (mnemonic != "ld") {
+        error("unknown instruction, or wrong operands for it: " + mnemonic);
+        return;
+    }
+
+    Displacement disp = static_cast<Displacement>(operand.literal);
+
+    switch (operand.kind) {
+        case InstructionOperandKind::ImmediateLiteral:
+            if (!fitsInDisplacement(disp)) {
+                error("ld $<literal> too wide for a displacement, needs the literal pool");
+                return;
+            }
+            // gpr[A] <= gpr[B] + D, with B = r0
+            emitInstruction(0x9, 0x1, gpr, 0, 0, disp);
+            break;
+
+        case InstructionOperandKind::MemoryLiteral:
+            if (!fitsInDisplacement(disp)) {
+                error("ld <literal> address too wide for a displacement, needs the literal pool");
+                return;
+            }
+            // gpr[A] <= mem32[gpr[B] + gpr[C] + D], with B = C = r0
+            emitInstruction(0x9, 0x2, gpr, 0, 0, disp);
+            break;
+
+        case InstructionOperandKind::RegisterIndirect:
+            emitInstruction(0x9, 0x2, gpr, operand.reg, 0, 0);
+            break;
+
+        case InstructionOperandKind::RegisterLiteralOffset:
+            if (!fitsInDisplacement(disp)) {
+                error("ld [%reg + <literal>]: literal does not fit in a 12 bit signed displacement");
+                return;
+            }
+            emitInstruction(0x9, 0x2, gpr, operand.reg, 0, disp);
+            break;
+
+        case InstructionOperandKind::RegisterSymbolOffset:
+            if (!displacementFromSymbol(operand.symbol, disp))
+                return;
+            emitInstruction(0x9, 0x2, gpr, operand.reg, 0, disp);
+            break;
+
+        default:
+            instructionUnimplemented(mnemonic, operand);
+            break;
+    }
+}
+
+void Assembler::instructionStore(const std::string &mnemonic,
+                                 RegIndex gpr,
+                                 const InstructionOperand &operand) {
+    if (mnemonic != "st") {
+        error("unknown instruction, or wrong operands for it: " + mnemonic);
+        return;
+    }
+
+    Displacement disp = static_cast<Displacement>(operand.literal);
+
+    switch (operand.kind) {
+        case InstructionOperandKind::ImmediateLiteral:
+        case InstructionOperandKind::ImmediateSymbol:
+            error("st cannot store into an immediate operand");
+            return;
+
+        case InstructionOperandKind::MemoryLiteral:
+            if (!fitsInDisplacement(disp)) {
+                error("st <literal> address too wide for a displacement, needs the literal pool");
+                return;
+            }
+            // mem32[gpr[A] + gpr[B] + D] <= gpr[C], with A = B = r0
+            emitInstruction(0x8, 0x0, 0, 0, gpr, disp);
+            break;
+
+        case InstructionOperandKind::RegisterIndirect:
+            emitInstruction(0x8, 0x0, operand.reg, 0, gpr, 0);
+            break;
+
+        case InstructionOperandKind::RegisterLiteralOffset:
+            if (!fitsInDisplacement(disp)) {
+                error("st [%reg + <literal>]: literal does not fit in a 12 bit signed displacement");
+                return;
+            }
+            emitInstruction(0x8, 0x0, operand.reg, 0, gpr, disp);
+            break;
+
+        case InstructionOperandKind::RegisterSymbolOffset:
+            if (!displacementFromSymbol(operand.symbol, disp))
+                return;
+            emitInstruction(0x8, 0x0, operand.reg, 0, gpr, disp);
+            break;
+
+        default:
+            instructionUnimplemented(mnemonic, operand);
+            break;
+    }
+}
+
+void Assembler::instructionUnimplemented(const std::string &mnemonic,
+                                         const InstructionOperand &operand) {
+    error(mnemonic + ": operand notation " + operandKindName(operand.kind)
+          + " is parsed but not encoded yet");
 }
