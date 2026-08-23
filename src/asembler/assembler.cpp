@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 
 // Cosmetic, but must stay fixed so re-emitting a parsed object file reproduces it exactly.
 static constexpr std::size_t BYTES_PER_LINE = 16;
@@ -253,6 +254,50 @@ void Assembler::relocateAgainst(SymIndex symbol_index) {
     section->relocs.push_back(reloc);
 }
 
+void Assembler::makeBackpatchNote(std::uint16_t pool_index) {
+    Section *cur_sctn = findSection(current_section);
+    if(cur_sctn == nullptr) {
+        error("No section to create backpatch note for.");
+        return;
+    }
+    cur_sctn->pool_fixups.push_back({cur_sctn->getLocationCounter(), pool_index});
+}
+
+void Assembler::flushLiteralPools() {
+    // Remember the current section, as we change it within the loop, restore it afterwards
+    SymIndex last_section = current_section;
+    for(Section &section : section_table) {
+        std::uint32_t literal_pool_base = section.getLocationCounter();
+        // for methods like emitByte which read current_section
+        current_section = section.symTab_index;
+        for(const PoolFixup &bp : section.pool_fixups) {
+            // calculate displacement that will be patched into the instruction
+            Displacement patch_displacement = pcRelativeDisplacement(literal_pool_base + 4*bp.pool_index, bp.instruction_offset);
+            if (!fitsInDisplacement(patch_displacement)) {
+                error("literal pool is too far from the instruction at offset " + std::to_string(bp.instruction_offset) + " - section: " + symbol_table[section.symTab_index].name + " is too large");
+                continue;
+            }
+            // Patch bytes of the instruction
+            // Byte3: CCCCDDDD
+            section.bytes[bp.instruction_offset+2] = (section.bytes[bp.instruction_offset+2] & 0xF0) | ((patch_displacement >> 8) & 0x0F);
+            // Byte4: DDDDDDDD
+            section.bytes[bp.instruction_offset+3] = 0xFF & patch_displacement;
+        }
+
+        for(const LiteralPoolEntry &lp_entry : section.literal_pool) {
+            if (lp_entry.is_symbol) {
+                relocateAgainst(lp_entry.symbol);
+                emitWord(0);
+            }
+            else {
+                // If literal, just emit the literal value
+                emitWord(lp_entry.literal);
+            }
+        }
+    }
+    current_section = last_section;
+}
+
 void Assembler::resolveRelocs() {
     for (Section &section : section_table) {
         for (Reloc &reloc : section.relocs) {
@@ -286,10 +331,9 @@ void Assembler::handleWordLiteral(const std::uint32_t literal) {
 }
 
 void Assembler::endAssembly() {
-    if (hadError())
-        return;
-
+    flushLiteralPools();
     resolveRelocs();
+    if (hadError()) return;
     writeObjectFile();
 }
 
@@ -374,6 +418,47 @@ bool Assembler::displacementFromSymbol(const std::string &symbol_name, Displacem
     return true;
 }
 
+std::uint16_t Assembler::getOrCreatePoolEntry(const InstructionOperand &operand) {
+    Section *cur_sect = findSection(current_section);
+    if (!cur_sect) {
+        error("No section to make literal pool entry for!");
+        return NO_LITERAL_POOL_ENTRY;
+    }
+
+    LiteralPoolEntry pool_entry_candidate;
+
+    switch(operand.kind) {
+        case InstructionOperandKind::ImmediateLiteral:
+        case InstructionOperandKind::MemoryLiteral:
+            pool_entry_candidate.literal = operand.literal;
+            pool_entry_candidate.is_symbol = false;
+            break;
+        case InstructionOperandKind::ImmediateSymbol:
+        case InstructionOperandKind::MemorySymbol:
+            pool_entry_candidate.symbol = getOrCreateSymbol(operand.symbol);
+            pool_entry_candidate.is_symbol = true;
+            break;
+        default:
+            error("operand kind cannot go in the literal pool");
+            return NO_LITERAL_POOL_ENTRY;
+    }
+    // Check if literal pool entry with the necessary value exists, if not make a new one, and return its index
+    auto &pool = cur_sect->literal_pool;
+    auto it = std::find(pool.begin(), pool.end(), pool_entry_candidate);
+    if(it != pool.end())
+        return static_cast<std::uint16_t>(it - pool.begin());
+    pool.push_back(pool_entry_candidate);
+    return static_cast<std::uint16_t>(pool.size() - 1);
+}
+
+void Assembler::emitInstructionViaPool(std::uint8_t oc, std::uint8_t mod, RegIndex regA, RegIndex regB, RegIndex regC, const InstructionOperand &operand) {
+    std::uint16_t slot = getOrCreatePoolEntry(operand);
+    if (slot == NO_LITERAL_POOL_ENTRY)
+        return;
+    makeBackpatchNote(slot);
+    emitInstruction(oc, mod, regA, regB, regC, 0);
+}
+
 void Assembler::instructionLoad(const std::string &mnemonic,
                                 const InstructionOperand &operand,
                                 RegIndex gpr) {
@@ -382,13 +467,16 @@ void Assembler::instructionLoad(const std::string &mnemonic,
         return;
     }
 
+    // TODO Maybe change this naming, literal is 32 bits and displacements should be max 12 bits
     Displacement disp = static_cast<Displacement>(operand.literal);
 
     switch (operand.kind) {
         case InstructionOperandKind::ImmediateLiteral:
             if (!fitsInDisplacement(disp)) {
-                error("ld $<literal> too wide for a displacement, needs the literal pool");
-                return;
+                // Literal is too wide, need to use literal pool
+                // gpr[A] <= mem32[gpr[B]+gpr[C]+D]
+                emitInstructionViaPool(0x9, 0x2, gpr, PC, 0, operand);
+                break;
             }
             // gpr[A] <= gpr[B] + D, with B = r0
             emitInstruction(0x9, 0x1, gpr, 0, 0, disp);
@@ -396,11 +484,29 @@ void Assembler::instructionLoad(const std::string &mnemonic,
 
         case InstructionOperandKind::MemoryLiteral:
             if (!fitsInDisplacement(disp)) {
-                error("ld <literal> address too wide for a displacement, needs the literal pool");
-                return;
+                // Literal is too wide, needs to use literal pool
+                // have to first fetch the literal
+                // gpr[A] <= mem32[gpr[B] + gpr[C] + D] - gpr <= mem32[PC+0+DISP(filled later)] - pool_entry
+                emitInstructionViaPool(0x9, 0x2, gpr, PC, 0, operand);
+                // gpr[A] <= mem32[gpr[B] + gpr[C] + D] - gpr <= mem32[gpr(pool_entry) + 0 + 0]
+                emitInstruction(0x9, 0x2, gpr, gpr, 0, 0);
+                break;
             }
             // gpr[A] <= mem32[gpr[B] + gpr[C] + D], with B = C = r0
             emitInstruction(0x9, 0x2, gpr, 0, 0, disp);
+            break;
+
+        case InstructionOperandKind::ImmediateSymbol:
+            // Needs literal pool entry unconditionally
+            emitInstructionViaPool(0x9, 0x2, gpr, PC, 0, operand);
+            break;
+
+        case InstructionOperandKind::MemorySymbol:
+            // Needs literal pool entry unconditionally
+            // load symbol value into gpr
+            emitInstructionViaPool(0x9, 0x2, gpr, PC, 0, operand);
+            // load memory value at the address contained within the symbol value
+            emitInstruction(0x9, 0x2, gpr, gpr, 0, 0);
             break;
 
         case InstructionOperandKind::RegisterIndirect:
@@ -445,13 +551,20 @@ void Assembler::instructionStore(const std::string &mnemonic,
 
         case InstructionOperandKind::MemoryLiteral:
             if (!fitsInDisplacement(disp)) {
-                error("st <literal> address too wide for a displacement, needs the literal pool");
-                return;
+                // mem32[mem32[gpr[A]+gpr[B]+D]]<=gpr[C];
+                // mem32[mem32[PC + 0 + 0 (literal in literal_pool after backpatch)]] <= gpr
+                emitInstructionViaPool(0x8, 0x2, PC, 0, gpr, operand);
+                break;
             }
             // mem32[gpr[A] + gpr[B] + D] <= gpr[C], with A = B = r0
             emitInstruction(0x8, 0x0, 0, 0, gpr, disp);
             break;
 
+        case InstructionOperandKind::MemorySymbol:
+            // mem32[mem32[gpr[A]+gpr[B]+D]] <= gpr[C]
+            // mem32[mem32[PC + 0 + 0 (will be offset to literal pool)]] <= gpr
+            emitInstructionViaPool(0x8, 0x2, PC, 0, gpr, operand);
+            break;
         case InstructionOperandKind::RegisterIndirect:
             emitInstruction(0x8, 0x0, operand.reg, 0, gpr, 0);
             break;

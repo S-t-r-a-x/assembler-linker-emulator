@@ -53,6 +53,30 @@ struct SymTab_entry {
     }
 };
 
+// Literal pool index that encodes error value when pool index is expected
+constexpr std::uint16_t NO_LITERAL_POOL_ENTRY = 4096;
+
+struct LiteralPoolEntry {
+    // true - use symbol field, false - use ltieral field
+    bool is_symbol = false;
+    std::uint32_t literal = 0;
+    // Index of the symbol, necessary for relocation purposes
+    // the literal pool slot will be a hole filled with 0 anyways
+    SymIndex symbol = UND;
+
+    bool operator==(const LiteralPoolEntry &other) const {
+        return is_symbol == other.is_symbol
+            && literal == other.literal
+            && symbol == other.symbol;
+    }
+};
+
+struct PoolFixup {
+    std::uint32_t instruction_offset; // offset from the section start to the instruction that needs to be patched up
+    std::uint16_t pool_index; // index of the literal pool entry inside of a section to which we need to point to
+    // TODO make this POTENTIALLY also used for jump instructions where pc relative jump can be made to same-section later declared symbol
+};
+
 struct Reloc {
     std::uint32_t offset;   // offset from section start to the hole that needs to be patched up
     std::uint32_t addend;   // A - the offset of the symbol that needs to be relocated from the section start
@@ -66,9 +90,12 @@ struct Section {
     std::vector<std::uint8_t> bytes;
     std::vector<Reloc> relocs;
 
+    std::vector<LiteralPoolEntry> literal_pool;
+    std::vector<PoolFixup> pool_fixups;
     explicit Section (SymIndex symTab_index) {
         this->symTab_index = symTab_index;
     }
+
 
     std::uint32_t getLocationCounter() const { return bytes.size(); }
 };
@@ -81,6 +108,13 @@ constexpr Displacement DISPLACEMENT_MAX = 2047;
 
 constexpr bool fitsInDisplacement(Displacement disp) {
     return disp >= DISPLACEMENT_MIN && disp <= DISPLACEMENT_MAX;
+}
+
+// PC is incremented before execute, so a pc-relative field is measured from the
+// instruction after this one, so we need to decrement the displacement by another word
+// Both arguments are offsets within the same section, or both addresses
+constexpr Displacement pcRelativeDisplacement(std::uint32_t target, std::uint32_t instruction) {
+    return static_cast<Displacement>(target) - static_cast<Displacement>(instruction) - 4;
 }
 
 // Jump instructions accept only MemoryLiteral / MemorySymbol
@@ -127,13 +161,6 @@ public:
     void defineLabel(const std::string &label_name);
     void emitZeros(std::uint32_t number_of_zeros);
 
-    void emitInstruction(std::uint8_t oc,
-                        std::uint8_t mod,
-                        RegIndex regA,
-                        RegIndex regB,
-                        RegIndex regC,
-                        Displacement disp);
-
     // Handlers for instructions with register only operands. No displacement to resolve, no pool slot, no relocation.
     void instructionNoOperand(const std::string &mnemonic);
     void instructionOneRegister(const std::string &mnemonic, RegIndex reg);
@@ -141,6 +168,7 @@ public:
     void instructionCsrRead(const std::string &mnemonic, RegIndex csr, RegIndex gpr);
     void instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, RegIndex csr);
     
+    // Handles for load/store instructions, who can take any operand type
     void instructionLoad(const std::string &mnemonic, const InstructionOperand &operand, RegIndex gpr);
     void instructionStore(const std::string &mnemonic, RegIndex gpr, const InstructionOperand &operand);
 
@@ -167,16 +195,38 @@ private:
     // [%reg + symbol] needs the symbol's *final* value at assembly time, which only an
     // absolute symbol (declared via .equ) has. Errors and returns false otherwise.
     bool displacementFromSymbol(const std::string &symbol_name, Displacement &disp);
+
+    // Checks if current sections literal_pool contains the operand contents (based on operand type)
+    // If yes, returns its existing index, otherwise creates new entry in the literal pool and returns its index
+    std::uint16_t getOrCreatePoolEntry(const InstructionOperand &operand);
     
     // emitting content into sections
     void emitByte(std::uint8_t byte);
     // little-endian, data only, instructions are not in little-endian order
-    void emitWord(std::uint32_t word); 
+    void emitWord(std::uint32_t word);
+
+    void emitInstruction(std::uint8_t oc,
+                         std::uint8_t mod,
+                         RegIndex regA,
+                         RegIndex regB,
+                         RegIndex regC,
+                         Displacement disp);
+
+    void emitInstructionViaPool(std::uint8_t oc,
+                                std::uint8_t mod,
+                                RegIndex regA,
+                                RegIndex regB,
+                                RegIndex regC,
+                                const InstructionOperand &operand);
 
     // records an R_32 relocation for the 4 bytes about to be emitted, must be called before the emit because it reads the location counter
     void relocateAgainst(SymIndex symbol_index);
 
+    // reads location counter, also must be called before emitting instruction
+    void makeBackpatchNote(std::uint16_t pool_index);
+
     // called at .end
+    void flushLiteralPools();
     void resolveRelocs();
 
     // output
