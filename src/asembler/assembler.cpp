@@ -238,6 +238,35 @@ void Assembler::emitZeros(std::uint32_t number_of_zeros) {
         section->bytes.push_back(0);
 }
 
+void Assembler::handleAscii(const std::string &str) {
+    for(std::size_t i = 0; i < str.length(); i++) {
+        if (str[i] != '\\') {
+            emitByte(static_cast<std::uint8_t>(str[i]));
+            continue;
+        }
+
+        // str[i] is \ so the next char decides what byte is emitted
+        if (i + 1 >= str.length()) {
+            error("string literal ends with a dangling backslash");
+            break;
+        }
+        i++;
+        switch (str[i]) {
+            case 'n':  emitByte(0x0A); break;
+            case 't':  emitByte(0x09); break;
+            case 'r':  emitByte(0x0D); break;
+            case '\\': emitByte(0x5C); break;
+            case '"':  emitByte(0x22); break;
+            // GNU as emits an unrecognized escape as the character itself
+            default:   emitByte(static_cast<std::uint8_t>(str[i])); break;
+            /* missing cases from GNU as: 
+             * \x hex-digits
+             * \ digit digit digit - An octal character code 
+            */
+        }
+    }
+}
+
 void Assembler::relocateAgainst(SymIndex symbol_index) {
     Section *section = findSection(current_section);
     if (section == nullptr) {

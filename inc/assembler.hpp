@@ -160,6 +160,7 @@ public:
     void declareExtern(const std::string &symbol_name);
     void defineLabel(const std::string &label_name);
     void emitZeros(std::uint32_t number_of_zeros);
+    void handleAscii(const std::string &str);
 
     // Handlers for instructions with register only operands. No displacement to resolve, no pool slot, no relocation.
     void instructionNoOperand(const std::string &mnemonic);

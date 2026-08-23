@@ -155,7 +155,7 @@ directive
   | DOT IDENT STRING 
       { 
         if ($2 == "ascii") {
-          // TODO
+          assembler.handleAscii($3);
         }
         else 
           error("unknown directive ." + $2);
