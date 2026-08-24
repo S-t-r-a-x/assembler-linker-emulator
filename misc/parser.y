@@ -213,7 +213,7 @@ instruction
   | IDENT REGISTER COMMA operand     /* st %gpr, <operand> */
       { assembler.instructionStore($1, static_cast<RegIndex>($2), $4); }
   | IDENT REGISTER COMMA REGISTER COMMA operand   /* beq, bne, bgt */
-      { assembler.instructionUnimplemented($1, $6); }
+      { assembler.instructionConditionalBranch($1, static_cast<RegIndex>($2), static_cast<RegIndex>($4), $6); }
   ;
 
 /* RegisterDirect is not here to avoid a reduce reduce conflict with the grammar rule for  instructions with 2 registers.

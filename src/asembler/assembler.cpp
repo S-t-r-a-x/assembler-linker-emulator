@@ -260,6 +260,7 @@ void Assembler::instructionOneOperand(const std::string &mnemonic, const Instruc
             }
             default:
                 error("incompatible operand type with jmp instruction!");
+                return;
         }
     }
     else if(mnemonic == "call") {
@@ -285,11 +286,62 @@ void Assembler::instructionOneOperand(const std::string &mnemonic, const Instruc
             }
             default:
                 error("incompatible operand type with call instruction!");
+                return;
         }
     }
     else {
         error("unknown instruction: " + mnemonic);
+        return;
     }
+}
+
+void Assembler::instructionConditionalBranch(const std::string &mnemonic,
+                                             RegIndex reg1,
+                                             RegIndex reg2,
+                                             const InstructionOperand &operand) {
+    // beq %gpr1, %gpr2, operand | if (gpr1 == gpr2) pc <= operand;         MOD 1001
+    // bne %gpr1, %gpr2, operand | if (gpr1 != gpr2) pc <= operand;         MOD 1010
+    // bgt %gpr1, %gpr2, operand | if (gpr1 signed> gpr2) pc <= operand;    MOD 1011
+    Displacement disp = static_cast<Displacement>(operand.literal);
+
+    // mod will be the memory indirect version (bit3 = 1)
+    std::uint8_t mod;
+    if(mnemonic == "beq")      mod = 0b1001;
+    else if(mnemonic == "bne") mod = 0b1010;
+    else if(mnemonic == "bgt") mod = 0b1011;
+    else {
+        error("unknown instruction, expected conditional branch!");
+        return;
+    }
+
+    // handle operand type cases
+    switch(operand.kind) {
+        case InstructionOperandKind::MemoryLiteral:
+            if (!fitsInDisplacement(disp)) {
+                // condbr_inst %gpr1, %gpr2, operand | if (gpr1 condbr_op gpr2) pc <= operand
+                // if (gpr[B] condbr_op gpr[C]) pc <= mem32[gpr[A] + D];
+                emitInstructionViaPool(0x3, mod, PC, reg1, reg2, operand);
+                break;
+            }
+            // if (gpr[B] condbr_op gpr[C]) pc <= gpr[A] + D;
+            // clear bit 3 of mod, to use literal as the jump address
+            emitInstruction(0x3, mod & ~0x8, 0, reg1, reg2, disp);
+            break;
+
+        case InstructionOperandKind::MemorySymbol: {
+            // We don't know yet if we can use PC relative addressing or not
+            SymIndex sym = getOrCreateSymbol(operand.symbol);
+            makeJumpFixup(sym);
+            // assume we're using the literal pool first (worst case), patch later if necessary
+            emitInstruction(0x3, mod, PC, reg1, reg2, 0);
+            break;
+        }
+
+        default:
+            error("incompatible operand type with a conditional branch instruction!");
+            return;
+    }
+
 }
 
 void Assembler::emitZeros(std::uint32_t number_of_zeros) {

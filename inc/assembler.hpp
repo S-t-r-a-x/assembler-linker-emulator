@@ -176,6 +176,10 @@ public:
     void instructionCsrRead(const std::string &mnemonic, RegIndex csr, RegIndex gpr);
     void instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, RegIndex csr);
     void instructionOneOperand(const std::string &mnemonic, const InstructionOperand &operand);
+    void instructionConditionalBranch(const std::string &mnemonic,
+                                      RegIndex reg1,
+                                      RegIndex reg2,
+                                      const InstructionOperand &operand);
     
     // Handles for load/store instructions, who can take any operand type
     void instructionLoad(const std::string &mnemonic, const InstructionOperand &operand, RegIndex gpr);
