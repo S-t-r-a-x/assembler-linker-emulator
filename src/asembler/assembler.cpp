@@ -227,6 +227,71 @@ void Assembler::instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, R
     emitInstruction(0x9, 0x4, csr, gpr, 0, 0);
 }
 
+void Assembler::makeJumpFixup(SymIndex symbol) {
+    Section *cur_sctn = findSection(current_section);
+    if (cur_sctn == nullptr) {
+        error("No section to create jump fixup for.");
+        return;
+    }
+    cur_sctn->jump_fixups.push_back({cur_sctn->getLocationCounter(), symbol});
+}
+
+void Assembler::instructionOneOperand(const std::string &mnemonic, const InstructionOperand &operand) {
+    Displacement disp = static_cast<Displacement>(operand.literal);
+    if(mnemonic == "jmp") {
+        switch(operand.kind) {
+            case InstructionOperandKind::MemoryLiteral:
+                if(!fitsInDisplacement(disp)) {
+                    // pc <= mem32[gpr[A] + D] - pc <= mem32[PC + disp_to_literal_pool_entry]
+                    emitInstructionViaPool(0x3, 0x8, PC, 0, 0, operand);
+                    break;
+                }
+                // pc <= gpr[A] + D - pc <= literal
+                emitInstruction(0x3, 0x0, 0, 0, 0, disp);
+                break;
+
+            case InstructionOperandKind::MemorySymbol: {
+                // We don't know yet if we can use PC relative addressing or not
+                SymIndex sym = getOrCreateSymbol(operand.symbol);
+                makeJumpFixup(sym);
+                // assume we're using the literal pool first (worst case), patch later if necessary
+                emitInstruction(0x3, 0x8, PC, 0, 0, 0);
+                break;
+            }
+            default:
+                error("incompatible operand type with jmp instruction!");
+        }
+    }
+    else if(mnemonic == "call") {
+        // TOOD
+        switch(operand.kind) {
+            case InstructionOperandKind::MemoryLiteral:
+                if(!fitsInDisplacement(disp)) {
+                    // push pc; pc<=mem32[gpr[A]+gpr[B]+D];
+                    emitInstructionViaPool(0x2, 0x1, PC, 0, 0, operand);
+                    break;
+                }
+                // push pc; pc<=gpr[A]+gpr[B]+D;
+                emitInstruction(0x2, 0x0, 0, 0, 0, disp);
+                break;
+
+            case InstructionOperandKind::MemorySymbol: {
+                // We don't know yet if we can use PC relative addressing or not
+                SymIndex sym = getOrCreateSymbol(operand.symbol);
+                makeJumpFixup(sym);
+                // assume we're using the literal pool first (worst case), patch later if necessary
+                emitInstruction(0x2, 0x1, PC, 0, 0, 0);
+                break;
+            }
+            default:
+                error("incompatible operand type with call instruction!");
+        }
+    }
+    else {
+        error("unknown instruction: " + mnemonic);
+    }
+}
+
 void Assembler::emitZeros(std::uint32_t number_of_zeros) {
     Section *section = findSection(current_section);
     if (section == nullptr) {
@@ -283,13 +348,47 @@ void Assembler::relocateAgainst(SymIndex symbol_index) {
     section->relocs.push_back(reloc);
 }
 
-void Assembler::makeBackpatchNote(std::uint16_t pool_index) {
+void Assembler::makePoolFixup(std::uint16_t pool_index) {
     Section *cur_sctn = findSection(current_section);
     if(cur_sctn == nullptr) {
-        error("No section to create backpatch note for.");
+        error("No section to create pool fixup for.");
         return;
     }
     cur_sctn->pool_fixups.push_back({cur_sctn->getLocationCounter(), pool_index});
+}
+
+void Assembler::resolveJumpFixups() {
+    SymIndex last_section = current_section;
+    for(Section &sctn : section_table) {
+        current_section = sctn.symTab_index;
+        for(JumpFixup &jf : sctn.jump_fixups) {
+            SymTab_entry &sym = symbol_table[jf.symbol];
+            Displacement disp_pcrel = pcRelativeDisplacement(sym.value, jf.instruction_offset); 
+            if(sym.is_defined 
+                && sym.section_index == sctn.symTab_index 
+                && fitsInDisplacement(disp_pcrel)) {
+                // instruction can use pc rel addressing
+                // Patch the instruction NOW and we're done
+                auto &inst_byte = jf.instruction_offset;
+                // All jump instructions have a just need bit 3 of MOD cleared for direct adressing
+                // call instruction needs to reset bit 1 for this
+                std::uint8_t oc = sctn.bytes[inst_byte] >> 4;
+                std::uint8_t indirect_bit = (oc == 0x2) ? 0x1 : 0x8; 
+                sctn.bytes[inst_byte] &= ~indirect_bit; 
+                sctn.bytes[inst_byte + 2] = (sctn.bytes[inst_byte + 2] & 0xF0) | (disp_pcrel>>8 & 0x0F);
+                sctn.bytes[inst_byte + 3] = 0xFF & disp_pcrel; 
+            }
+            else {
+                // Need to create a pool entry for the instruction
+                // Has to be done now instead of at instruction emission time, because at that point we dont know if it is necessary
+                std::uint16_t slot = getOrCreatePoolEntry({InstructionOperandKind::MemorySymbol, 0, 0, sym.name});
+                if (slot == NO_LITERAL_POOL_ENTRY)
+                    continue;
+                sctn.pool_fixups.push_back({jf.instruction_offset, slot});
+            }
+        }
+    }
+    current_section = last_section;
 }
 
 void Assembler::flushLiteralPools() {
@@ -299,18 +398,18 @@ void Assembler::flushLiteralPools() {
         std::uint32_t literal_pool_base = section.getLocationCounter();
         // for methods like emitByte which read current_section
         current_section = section.symTab_index;
-        for(const PoolFixup &bp : section.pool_fixups) {
+        for(const PoolFixup &pf : section.pool_fixups) {
             // calculate displacement that will be patched into the instruction
-            Displacement patch_displacement = pcRelativeDisplacement(literal_pool_base + 4*bp.pool_index, bp.instruction_offset);
+            Displacement patch_displacement = pcRelativeDisplacement(literal_pool_base + 4*pf.pool_index, pf.instruction_offset);
             if (!fitsInDisplacement(patch_displacement)) {
-                error("literal pool is too far from the instruction at offset " + std::to_string(bp.instruction_offset) + " - section: " + symbol_table[section.symTab_index].name + " is too large");
+                error("literal pool is too far from the instruction at offset " + std::to_string(pf.instruction_offset) + " - section: " + symbol_table[section.symTab_index].name + " is too large");
                 continue;
             }
             // Patch bytes of the instruction
             // Byte3: CCCCDDDD
-            section.bytes[bp.instruction_offset+2] = (section.bytes[bp.instruction_offset+2] & 0xF0) | ((patch_displacement >> 8) & 0x0F);
+            section.bytes[pf.instruction_offset+2] = (section.bytes[pf.instruction_offset+2] & 0xF0) | ((patch_displacement >> 8) & 0x0F);
             // Byte4: DDDDDDDD
-            section.bytes[bp.instruction_offset+3] = 0xFF & patch_displacement;
+            section.bytes[pf.instruction_offset+3] = 0xFF & patch_displacement;
         }
 
         for(const LiteralPoolEntry &lp_entry : section.literal_pool) {
@@ -360,6 +459,7 @@ void Assembler::handleWordLiteral(const std::uint32_t literal) {
 }
 
 void Assembler::endAssembly() {
+    resolveJumpFixups();
     flushLiteralPools();
     resolveRelocs();
     if (hadError()) return;
@@ -480,11 +580,16 @@ std::uint16_t Assembler::getOrCreatePoolEntry(const InstructionOperand &operand)
     return static_cast<std::uint16_t>(pool.size() - 1);
 }
 
-void Assembler::emitInstructionViaPool(std::uint8_t oc, std::uint8_t mod, RegIndex regA, RegIndex regB, RegIndex regC, const InstructionOperand &operand) {
+void Assembler::emitInstructionViaPool(std::uint8_t oc, 
+                                       std::uint8_t mod, 
+                                       RegIndex regA, 
+                                       RegIndex regB, 
+                                       RegIndex regC, 
+                                       const InstructionOperand &operand) {
     std::uint16_t slot = getOrCreatePoolEntry(operand);
     if (slot == NO_LITERAL_POOL_ENTRY)
         return;
-    makeBackpatchNote(slot);
+    makePoolFixup(slot);
     emitInstruction(oc, mod, regA, regB, regC, 0);
 }
 

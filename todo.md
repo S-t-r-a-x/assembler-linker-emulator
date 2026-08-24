@@ -32,3 +32,22 @@
   Fix it when level C lands, before the linker learns any ABS handling.
 - Note the dedup consequence: an `.equ` symbol and a literal of the same value
   then share one slot, which is correct and free.
+
+## [low] Pool slot lookup by SymIndex
+
+- `resolveJumpFixups` holds a `SymIndex` but has to package the name into a
+  throwaway `InstructionOperand`, so `getOrCreatePoolEntry` can string-search it
+  back into the index we already had. Correct, just a round-trip.
+- Split the find-or-append core out and give it two front doors:
+
+```cpp
+std::uint16_t getOrCreatePoolSlot(const LiteralPoolEntry &wanted);       // core: the std::find + push_back
+std::uint16_t getOrCreatePoolEntry(const InstructionOperand &operand);   // existing
+std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
+```
+
+- The operand version delegates its symbol branch to the new one, so how a
+  symbol pool entry is built stops existing in two places — that duplication is
+  what caused the earlier dedup bug.
+- Purely QOL, emitted bytes are already correct. Do it after the conditional
+  branches land.

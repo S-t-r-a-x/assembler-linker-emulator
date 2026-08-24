@@ -71,10 +71,16 @@ struct LiteralPoolEntry {
     }
 };
 
+// Essential part of the literal pool implementation
 struct PoolFixup {
     std::uint32_t instruction_offset; // offset from the section start to the instruction that needs to be patched up
     std::uint16_t pool_index; // index of the literal pool entry inside of a section to which we need to point to
-    // TODO make this POTENTIALLY also used for jump instructions where pc relative jump can be made to same-section later declared symbol
+};
+
+// Used for jump instruction, to be able to implement PC relative jumps to same section symbols
+struct JumpFixup {
+    std::uint32_t instruction_offset;
+    SymIndex symbol;
 };
 
 struct Reloc {
@@ -92,6 +98,7 @@ struct Section {
 
     std::vector<LiteralPoolEntry> literal_pool;
     std::vector<PoolFixup> pool_fixups;
+    std::vector<JumpFixup> jump_fixups;
     explicit Section (SymIndex symTab_index) {
         this->symTab_index = symTab_index;
     }
@@ -168,6 +175,7 @@ public:
     void instructionTwoRegisters(const std::string &mnemonic, RegIndex src, RegIndex dst);
     void instructionCsrRead(const std::string &mnemonic, RegIndex csr, RegIndex gpr);
     void instructionCsrWrite(const std::string &mnemonic, RegIndex gpr, RegIndex csr);
+    void instructionOneOperand(const std::string &mnemonic, const InstructionOperand &operand);
     
     // Handles for load/store instructions, who can take any operand type
     void instructionLoad(const std::string &mnemonic, const InstructionOperand &operand, RegIndex gpr);
@@ -223,10 +231,13 @@ private:
     // records an R_32 relocation for the 4 bytes about to be emitted, must be called before the emit because it reads the location counter
     void relocateAgainst(SymIndex symbol_index);
 
+    // Must be called before emitting each jump instruction that has a symbol operand
+    void makeJumpFixup(SymIndex symbol);
     // reads location counter, also must be called before emitting instruction
-    void makeBackpatchNote(std::uint16_t pool_index);
+    void makePoolFixup(std::uint16_t pool_index);
 
     // called at .end
+    void resolveJumpFixups();
     void flushLiteralPools();
     void resolveRelocs();
 

@@ -207,7 +207,7 @@ instruction
   | IDENT REGISTER COMMA CSR         /* csrwr %gpr, %csr */
       { assembler.instructionCsrWrite($1, $2, $4); }
   | IDENT operand                    /* jmp, call */
-      { assembler.instructionUnimplemented($1, $2); }
+      { assembler.instructionOneOperand($1, $2  ); }
   | IDENT operand COMMA REGISTER     /* ld <operand>, %gpr */
       { assembler.instructionLoad($1, $2, static_cast<RegIndex>($4)); }
   | IDENT REGISTER COMMA operand     /* st %gpr, <operand> */
