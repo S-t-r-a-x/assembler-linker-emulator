@@ -124,6 +124,12 @@ constexpr Displacement pcRelativeDisplacement(std::uint32_t target, std::uint32_
     return static_cast<Displacement>(target) - static_cast<Displacement>(instruction) - 4;
 }
 
+// The jump family has a direct and a memory indirect form that differ by one MOD bit:
+// bit 0 for call (OC 2), bit 3 for jmp and the branches (OC 3).
+constexpr std::uint8_t indirectBit(std::uint8_t oc) {
+    return oc == 0x2 ? 0x1 : 0x8;
+}
+
 // Jump instructions accept only MemoryLiteral / MemorySymbol
 enum class InstructionOperandKind {
     ImmediateLiteral,       // $<literal>          - the literal itself
@@ -231,6 +237,14 @@ private:
                                 RegIndex regB,
                                 RegIndex regC,
                                 const InstructionOperand &operand);
+
+    // jmp, call and the conditional branch instructions share one operand switch
+    // cond is 0 for the unconditional ones (jmp and call) - cond determines the mod
+    void emitJumpInstruction(std::uint8_t oc,
+                             std::uint8_t cond,
+                             RegIndex regB,
+                             RegIndex regC,
+                             const InstructionOperand &operand);
 
     // records an R_32 relocation for the 4 bytes about to be emitted, must be called before the emit because it reads the location counter
     void relocateAgainst(SymIndex symbol_index);

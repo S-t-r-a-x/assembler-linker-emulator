@@ -237,111 +237,30 @@ void Assembler::makeJumpFixup(SymIndex symbol) {
 }
 
 void Assembler::instructionOneOperand(const std::string &mnemonic, const InstructionOperand &operand) {
-    Displacement disp = static_cast<Displacement>(operand.literal);
-    if(mnemonic == "jmp") {
-        switch(operand.kind) {
-            case InstructionOperandKind::MemoryLiteral:
-                if(!fitsInDisplacement(disp)) {
-                    // pc <= mem32[gpr[A] + D] - pc <= mem32[PC + disp_to_literal_pool_entry]
-                    emitInstructionViaPool(0x3, 0x8, PC, 0, 0, operand);
-                    break;
-                }
-                // pc <= gpr[A] + D - pc <= literal
-                emitInstruction(0x3, 0x0, 0, 0, 0, disp);
-                break;
-
-            case InstructionOperandKind::MemorySymbol: {
-                // We don't know yet if we can use PC relative addressing or not
-                SymIndex sym = getOrCreateSymbol(operand.symbol);
-                makeJumpFixup(sym);
-                // assume we're using the literal pool first (worst case), patch later if necessary
-                emitInstruction(0x3, 0x8, PC, 0, 0, 0);
-                break;
-            }
-            default:
-                error("incompatible operand type with jmp instruction!");
-                return;
-        }
-    }
-    else if(mnemonic == "call") {
-        // TOOD
-        switch(operand.kind) {
-            case InstructionOperandKind::MemoryLiteral:
-                if(!fitsInDisplacement(disp)) {
-                    // push pc; pc<=mem32[gpr[A]+gpr[B]+D];
-                    emitInstructionViaPool(0x2, 0x1, PC, 0, 0, operand);
-                    break;
-                }
-                // push pc; pc<=gpr[A]+gpr[B]+D;
-                emitInstruction(0x2, 0x0, 0, 0, 0, disp);
-                break;
-
-            case InstructionOperandKind::MemorySymbol: {
-                // We don't know yet if we can use PC relative addressing or not
-                SymIndex sym = getOrCreateSymbol(operand.symbol);
-                makeJumpFixup(sym);
-                // assume we're using the literal pool first (worst case), patch later if necessary
-                emitInstruction(0x2, 0x1, PC, 0, 0, 0);
-                break;
-            }
-            default:
-                error("incompatible operand type with call instruction!");
-                return;
-        }
-    }
-    else {
+    if (mnemonic == "jmp")
+        emitJumpInstruction(0x3, 0x0, 0, 0, operand);
+    else if (mnemonic == "call")
+        emitJumpInstruction(0x2, 0x0, 0, 0, operand);
+    else
         error("unknown instruction: " + mnemonic);
-        return;
-    }
 }
 
 void Assembler::instructionConditionalBranch(const std::string &mnemonic,
                                              RegIndex reg1,
                                              RegIndex reg2,
                                              const InstructionOperand &operand) {
-    // beq %gpr1, %gpr2, operand | if (gpr1 == gpr2) pc <= operand;         MOD 1001
-    // bne %gpr1, %gpr2, operand | if (gpr1 != gpr2) pc <= operand;         MOD 1010
-    // bgt %gpr1, %gpr2, operand | if (gpr1 signed> gpr2) pc <= operand;    MOD 1011
-    Displacement disp = static_cast<Displacement>(operand.literal);
-
-    // mod will be the memory indirect version (bit3 = 1)
-    std::uint8_t mod;
-    if(mnemonic == "beq")      mod = 0b1001;
-    else if(mnemonic == "bne") mod = 0b1010;
-    else if(mnemonic == "bgt") mod = 0b1011;
+    // the condition only, emitJumpInstruction applies the direct/indirect form bit
+    std::uint8_t cond;
+    if (mnemonic == "beq")      cond = 0b001;
+    else if (mnemonic == "bne") cond = 0b010;
+    else if (mnemonic == "bgt") cond = 0b011;
     else {
         error("unknown instruction, expected conditional branch!");
         return;
     }
 
-    // handle operand type cases
-    switch(operand.kind) {
-        case InstructionOperandKind::MemoryLiteral:
-            if (!fitsInDisplacement(disp)) {
-                // condbr_inst %gpr1, %gpr2, operand | if (gpr1 condbr_op gpr2) pc <= operand
-                // if (gpr[B] condbr_op gpr[C]) pc <= mem32[gpr[A] + D];
-                emitInstructionViaPool(0x3, mod, PC, reg1, reg2, operand);
-                break;
-            }
-            // if (gpr[B] condbr_op gpr[C]) pc <= gpr[A] + D;
-            // clear bit 3 of mod, to use literal as the jump address
-            emitInstruction(0x3, mod & ~0x8, 0, reg1, reg2, disp);
-            break;
-
-        case InstructionOperandKind::MemorySymbol: {
-            // We don't know yet if we can use PC relative addressing or not
-            SymIndex sym = getOrCreateSymbol(operand.symbol);
-            makeJumpFixup(sym);
-            // assume we're using the literal pool first (worst case), patch later if necessary
-            emitInstruction(0x3, mod, PC, reg1, reg2, 0);
-            break;
-        }
-
-        default:
-            error("incompatible operand type with a conditional branch instruction!");
-            return;
-    }
-
+    // if (gpr[B] cond gpr[C]) pc <= operand
+    emitJumpInstruction(0x3, cond, reg1, reg2, operand);
 }
 
 void Assembler::emitZeros(std::uint32_t number_of_zeros) {
@@ -425,8 +344,7 @@ void Assembler::resolveJumpFixups() {
                 // All jump instructions have a just need bit 3 of MOD cleared for direct adressing
                 // call instruction needs to reset bit 1 for this
                 std::uint8_t oc = sctn.bytes[inst_byte] >> 4;
-                std::uint8_t indirect_bit = (oc == 0x2) ? 0x1 : 0x8; 
-                sctn.bytes[inst_byte] &= ~indirect_bit; 
+                sctn.bytes[inst_byte] &= ~indirectBit(oc); 
                 sctn.bytes[inst_byte + 2] = (sctn.bytes[inst_byte + 2] & 0xF0) | (disp_pcrel>>8 & 0x0F);
                 sctn.bytes[inst_byte + 3] = 0xFF & disp_pcrel; 
             }
@@ -643,6 +561,35 @@ void Assembler::emitInstructionViaPool(std::uint8_t oc,
         return;
     makePoolFixup(slot);
     emitInstruction(oc, mod, regA, regB, regC, 0);
+}
+
+void Assembler::emitJumpInstruction(std::uint8_t oc,
+                                    std::uint8_t cond,
+                                    RegIndex regB,
+                                    RegIndex regC,
+                                    const InstructionOperand &operand) {
+    switch (operand.kind) {
+        case InstructionOperandKind::MemoryLiteral: {
+            Displacement disp = static_cast<Displacement>(operand.literal);
+            if (fitsInDisplacement(disp)) {
+                // pc <= gpr[A] + D, with A = r0, so D is the absolute target address
+                emitInstruction(oc, cond & ~indirectBit(oc), 0, regB, regC, disp);
+                break;
+            }
+            emitInstructionViaPool(oc, cond | indirectBit(oc), PC, regB, regC, operand);
+            break;
+        }
+
+        case InstructionOperandKind::MemorySymbol:
+            // assume the pool is needed, resolveJumpFixups clears the bit if pc relative reaches
+            makeJumpFixup(getOrCreateSymbol(operand.symbol));
+            emitInstruction(oc, cond | indirectBit(oc), PC, regB, regC, 0);
+            break;
+
+        default:
+            error(std::string("operand notation ") + operandKindName(operand.kind)
+                  + " is not a valid jump target");
+    }
 }
 
 void Assembler::instructionLoad(const std::string &mnemonic,
