@@ -53,6 +53,20 @@ struct SymTab_entry {
     }
 };
 
+struct SymbolTerm {
+    std::string symbol_name;
+    short sign; // +1 for '+', -1 for '-'
+};
+
+struct Expression {
+    std::int32_t constant = 0;
+    std::vector<SymbolTerm> terms;
+
+    Expression() = default;
+    Expression(std::int32_t constant) : constant(constant) {}
+    Expression(SymbolTerm st) { terms.push_back(st); }
+};
+
 // Literal pool index that encodes error value when pool index is expected
 constexpr std::uint16_t NO_LITERAL_POOL_ENTRY = 4096;
 
@@ -174,6 +188,7 @@ public:
     void defineLabel(const std::string &label_name);
     void emitZeros(std::uint32_t number_of_zeros);
     void handleAscii(const std::string &str);
+    void defineEquSymbol(const std::string &symbol_name, const Expression &expression);
 
     // Handlers for instructions with register only operands. No displacement to resolve, no pool slot, no relocation.
     void instructionNoOperand(const std::string &mnemonic);
@@ -197,12 +212,15 @@ public:
     void endAssembly(); // .end - writes the object file
 
     bool hadError() const { return error_count > 0; }
+    // Public because the parser reports syntax errors through the same counter.
+    void error(const std::string &error_msg);
 
 private:
     std::vector<SymTab_entry> symbol_table;
     std::vector<Section> section_table;
     SymIndex current_section; // index of the current section in the symbol table
     std::string write_path; // output file location
+    unsigned int error_count = 0; // error handling
 
     // Symbol table
     SymIndex findSymbolByName(const std::string &entry_name) const;
@@ -261,8 +279,4 @@ private:
 
     // output
     void writeObjectFile();
-
-    // error handling
-    unsigned int error_count = 0;
-    void error(const std::string &error_msg);
 };

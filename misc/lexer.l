@@ -2,7 +2,21 @@
   /* Lexer feeding the bison parser. parser.tab.h holds the token codes and
      the yylval variant type; bison generates it from parser.y -- not us. */
   #include "parser.tab.h"
+  #include <cstring>
   #define YY_DECL int yylex(yy::parser::semantic_type *yylval)
+
+  static int directiveToken(const char *name) {
+    using tok = yy::parser::token;
+    if (!strcmp(name, "section")) return tok::SECTION;
+    if (!strcmp(name, "global"))  return tok::GLOBAL;
+    if (!strcmp(name, "extern"))  return tok::EXTERN;
+    if (!strcmp(name, "word"))    return tok::WORD;
+    if (!strcmp(name, "skip"))    return tok::SKIP;
+    if (!strcmp(name, "ascii"))   return tok::ASCII;
+    if (!strcmp(name, "equ"))     return tok::EQU;
+    if (!strcmp(name, "end"))     return tok::END;
+    return -1;
+  }
 %}
 %option noyywrap
 %option nounput noinput
@@ -17,7 +31,12 @@
 #.*                         ; /* skip comments */
 [ \t\r]+                    ; /* skip inline whitespace */
 \n                          { return yy::parser::token::EOL; }
-\.                          { return yy::parser::token::DOT; }
+\.[a-zA-Z_][a-zA-Z0-9_]*    {
+                              int token = directiveToken(yytext + 1);
+                              if (token >= 0) return token;
+                              yylval->emplace<std::string>(yytext);
+                              return yy::parser::token::UNKNOWN_DIRECTIVE;
+                            }
 [a-zA-Z_][a-zA-Z0-9_]*      { 
                               yylval->emplace<std::string>(yytext); 
                               return yy::parser::token::IDENT; 
@@ -63,8 +82,9 @@
 \[                          { return yy::parser::token::LBRACKET; }
 \]                          { return yy::parser::token::RBRACKET; }
 \+                          { return yy::parser::token::PLUS; }
+\-                          { return yy::parser::token::MINUS; }
 ,                           { return yy::parser::token::COMMA; }
 :                           { return yy::parser::token::COLON; }
-.                           ; /* ignore unknown chars for now */
+.                           { return yy::parser::token::UNKNOWN; }
 
 %%
