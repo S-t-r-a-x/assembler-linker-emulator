@@ -458,12 +458,12 @@ void Assembler::defineEquSymbol(const std::string &symbol_name, const Expression
     }
     symbol_table[sym].is_defined = true;
     
-    if (evaluateExpression(sym, expression) == ExprResult::Pending) {
-        incalculatable_symbols_table.push_back({sym, expression});
+    if (evaluateEquSymbol(sym, expression) == ExprResult::Pending) {
+        pending_equs_table.push_back({sym, expression});
     }
 }
 
-ExprResult Assembler::evaluateExpression(SymIndex sym, const Expression &expression) {
+ExprResult Assembler::evaluateEquSymbol(SymIndex sym, const Expression &expression) {
     std::int32_t value = expression.constant; // end value of our expression, we build this over time
     std::map<SymIndex, int> coefficients;
     
@@ -501,7 +501,6 @@ ExprResult Assembler::evaluateExpression(SymIndex sym, const Expression &express
     }
 
     equ_entry.section_index = equ_section;
-    equ_entry.is_defined = true;
     equ_entry.value = value;
     
     return ExprResult::Resolved;
@@ -510,25 +509,25 @@ ExprResult Assembler::evaluateExpression(SymIndex sym, const Expression &express
 void Assembler::resolveEquSymbols() {
     
     // resolve symbols until the list is empty 
-    while(incalculatable_symbols_table.size() > 0) {
+    while(pending_equs_table.size() > 0) {
         // iterate over the list, if the list doesnt resolve any symbol
         // after one pass, symbols are unresolvable and it is an error
-        size_t previous_size = incalculatable_symbols_table.size();
+        size_t previous_size = pending_equs_table.size();
 
-        incalculatable_symbols_table.erase(
+        pending_equs_table.erase(
             std::remove_if(
-                incalculatable_symbols_table.begin(),
-                incalculatable_symbols_table.end(),
+                pending_equs_table.begin(),
+                pending_equs_table.end(),
                 [this](auto &elem) {
-                    return evaluateExpression(elem.symtab_index, elem.expression) != ExprResult::Pending;
+                    return evaluateEquSymbol(elem.symbol, elem.expression) != ExprResult::Pending;
                 }),
-            incalculatable_symbols_table.end());
+            pending_equs_table.end());
 
         // If no symbols were resolved in this pass, hard error
-        if (incalculatable_symbols_table.size() == previous_size) {
+        if (pending_equs_table.size() == previous_size) {
             // Report error for remaining unresolvable / cyclic symbols
-            for (const auto &elem : incalculatable_symbols_table) {
-                error("Unresolvable or circular dependency in .equ symbol at index " + std::to_string(elem.symtab_index));
+            for (const auto &elem : pending_equs_table) {
+                error("Unresolvable or circular dependency in .equ symbol at index " + std::to_string(elem.symbol));
             }
             return;
         }
