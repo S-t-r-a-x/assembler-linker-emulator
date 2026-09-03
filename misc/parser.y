@@ -78,7 +78,7 @@ directive
   | EQU IDENT COMMA expression
       { assembler.defineEquSymbol($2, $4); }
   | END
-      { assembler.endAssembly(); }
+      { assembler.endAssembly(); YYACCEPT; }
   | UNKNOWN_DIRECTIVE
       { assembler.error("unknown directive " + $1); }
   ;

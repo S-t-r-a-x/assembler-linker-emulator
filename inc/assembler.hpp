@@ -17,6 +17,13 @@ enum class Type {
     SCTN
 };
 
+// Pending means a term is not defined yet, so retry at .end. Invalid is already reported
+enum class ExprResult {
+    Resolved,
+    Pending,
+    Invalid
+};
+
 enum class Bind {
     LOC,
     GLOB 
@@ -280,7 +287,7 @@ private:
     void makePoolFixup(std::uint16_t pool_index);
 
     // used for .equ defined expressions, true signifies resolve, false signifies no change
-    bool evaluateExpression(SymIndex sym, const Expression &expression);
+    ExprResult evaluateExpression(SymIndex sym, const Expression &expression);
     void resolveEquSymbols();
 
     // called at .end

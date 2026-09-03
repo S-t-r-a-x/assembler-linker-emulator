@@ -51,3 +51,33 @@ std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
   what caused the earlier dedup bug.
 - Purely QOL, emitted bytes are already correct. Do it after the conditional
   branches land.
+
+## [assembler] `[%reg + <simbol>]` with a forward `.equ` is rejected
+
+- `displacementFromSymbol` asks for the value at *emit* time, so a `.equ` defined
+  **later** in the file errors even though it resolves fine by `.end`. A `.equ`
+  defined earlier already works, and a label is a spec-mandated error either way
+  (`Project_specs.md:147`, footnote 2).
+- Defensible as-is: footnote 2 says to error when the value "nije poznata u
+  trenutku asembliranja", and erroring at the instruction is one reading of that.
+- Fix if a hidden test needs it: give the operand a fixup like `JumpFixup` —
+  record `{instruction_offset, symbol}`, emit displacement 0, and patch in a pass
+  that runs *after* `resolveEquSymbols`. Reuse the 12 bit splice already in
+  `flushLiteralPools`; factor it into `patchDisplacement(section, offset, disp)`
+  rather than copying it. ~35 lines.
+- Stale marker sits at the `RegisterSymbolOffset` case in `instructionLoad`.
+
+## [optional] End assembly at EOF, for files with no `.end`
+
+- `.end` is the only thing that calls `endAssembly`, so a file without it exits 0
+  and writes nothing at all. Every public test has `.end`, so this is a strict
+  addition — no specified behaviour changes — and `Project_specs.md:38` says to
+  follow GNU as on undefined details, which assembles fine with no end marker.
+- Two edits: a `bool assembly_ended` guard at the top of `endAssembly` so it is
+  idempotent, and a call from `main.cpp` after `parse()` returns 0.
+- The guard is what makes it safe. The passes are not idempotent — running
+  `endAssembly` twice appends the literal pool a second time and re-patches the
+  instruction to point at the duplicate. `YYACCEPT` on `.end` already prevents
+  that today, but the EOF path would reintroduce it without the guard.
+- Skip the call and error instead if you would rather a truncated file fail
+  loudly: `.end` is the only signal that a file is complete. Same one line.

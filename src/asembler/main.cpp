@@ -8,7 +8,7 @@ extern FILE* yyin;
 
 int main(int argc, char** argv) {
     const char* inputPath = nullptr;
-    const char* outputPath = nullptr;
+    const char* outputPath = "a.out"; // GNU as default when -o is omitted
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0) {
@@ -22,10 +22,8 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Both are required: the Assembler ctor takes std::string, and
-    // constructing one from a null char* throws instead of erroring cleanly.
-    if (!inputPath || !outputPath) {
-        std::cerr << "usage: asembler -o <output> <input>\n";
+    if (!inputPath) {
+        std::cerr << "usage: asembler [-o <output>] <input>\n";
         return 1;
     }
 

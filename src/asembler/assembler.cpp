@@ -65,6 +65,10 @@ void Assembler::declareExtern(const std::string &symbol_name) {
     // TODO maybe, add guard check for SCTN type
     SymIndex index = getOrCreateSymbol(symbol_name);
     SymTab_entry &symbol_entry = symbol_table[index];
+    if (symbol_entry.is_defined) {
+        error("cannot extern a symbol defined in this file: " + symbol_name);
+        return;
+    }
     symbol_entry.bind = Bind::GLOB;
     symbol_entry.is_extern = true;
 }
@@ -80,6 +84,10 @@ void Assembler::defineLabel(const std::string &label_name) {
     
     if(label_entry.is_defined) {
         error("Multiple label definitions. Label: " + label_name);
+        return;
+    }
+    if(label_entry.is_extern) {
+        error("cannot define a label for an extern symbol: " + label_name);
         return;
     }
     
@@ -444,14 +452,18 @@ void Assembler::defineEquSymbol(const std::string &symbol_name, const Expression
         error("bad equ directive. Multiple definitions for symbol: " + symbol_name);
         return;
     }
+    if (symbol_table[sym].is_extern) {
+        error("bad equ directive. Cannot define an extern symbol: " + symbol_name);
+        return;
+    }
     symbol_table[sym].is_defined = true;
     
-    if (!evaluateExpression(sym, expression)) {
+    if (evaluateExpression(sym, expression) == ExprResult::Pending) {
         incalculatable_symbols_table.push_back({sym, expression});
     }
 }
 
-bool Assembler::evaluateExpression(SymIndex sym, const Expression &expression) {
+ExprResult Assembler::evaluateExpression(SymIndex sym, const Expression &expression) {
     std::int32_t value = expression.constant; // end value of our expression, we build this over time
     std::map<SymIndex, int> coefficients;
     
@@ -460,10 +472,10 @@ bool Assembler::evaluateExpression(SymIndex sym, const Expression &expression) {
 
         if (term_sym.is_extern) {
             error("equ directive expression cannot contain external symbols");
-            return false;
+            return ExprResult::Invalid;
         }
         else if(term_sym.section_index == UND) 
-            return false;
+            return ExprResult::Pending;
         
         // same for ABS and defined symbols
         value += term.sign * term_sym.value; 
@@ -480,18 +492,19 @@ bool Assembler::evaluateExpression(SymIndex sym, const Expression &expression) {
     for(const auto &[sctn, coefficient] : coefficients) {
         if(coefficient == 0)
             continue;
-        if(coefficient == 1 && equ_section) {
+        if(coefficient == 1 && equ_section == ABS) {
             equ_section = sctn;
             continue;
         }
         error("expression is neither absolute nor relative to a single section");
-        return false;
+        return ExprResult::Invalid;
     }
+
     equ_entry.section_index = equ_section;
     equ_entry.is_defined = true;
     equ_entry.value = value;
     
-    return true;
+    return ExprResult::Resolved;
 }
 
 void Assembler::resolveEquSymbols() {
@@ -507,11 +520,11 @@ void Assembler::resolveEquSymbols() {
                 incalculatable_symbols_table.begin(),
                 incalculatable_symbols_table.end(),
                 [this](auto &elem) {
-                    return evaluateExpression(elem.symtab_index, elem.expression);
+                    return evaluateExpression(elem.symtab_index, elem.expression) != ExprResult::Pending;
                 }),
             incalculatable_symbols_table.end());
 
-        // 2. If no symbols were resolved in this pass, we are stuck!
+        // If no symbols were resolved in this pass, hard error
         if (incalculatable_symbols_table.size() == previous_size) {
             // Report error for remaining unresolvable / cyclic symbols
             for (const auto &elem : incalculatable_symbols_table) {
