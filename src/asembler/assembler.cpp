@@ -4,6 +4,7 @@
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <map>
 
 // Cosmetic, but must stay fixed so re-emitting a parsed object file reproduces it exactly.
 static constexpr std::size_t BYTES_PER_LINE = 16;
@@ -34,7 +35,7 @@ SymIndex Assembler::getOrCreateSymbol(const std::string &symbol_name) {
 
 Section *Assembler::findSection(SymIndex symTab_index) {
     for (Section &section : section_table) {
-        if (section.symTab_index == symTab_index)
+        if (section.symTab_index  == symTab_index)
             return &section;
     }
     return nullptr; // no section with that symbol
@@ -341,7 +342,7 @@ void Assembler::resolveJumpFixups() {
                 // instruction can use pc rel addressing
                 // Patch the instruction NOW and we're done
                 auto &inst_byte = jf.instruction_offset;
-                // All jump instructions have a just need bit 3 of MOD cleared for direct adressing
+                // All jump instructions just need bit 3 of MOD cleared for direct adressing
                 // call instruction needs to reset bit 1 for this
                 std::uint8_t oc = sctn.bytes[inst_byte] >> 4;
                 sctn.bytes[inst_byte] &= ~indirectBit(oc); 
@@ -368,6 +369,7 @@ void Assembler::flushLiteralPools() {
         std::uint32_t literal_pool_base = section.getLocationCounter();
         // for methods like emitByte which read current_section
         current_section = section.symTab_index;
+        // patch up the displacements for the necessary instructions
         for(const PoolFixup &pf : section.pool_fixups) {
             // calculate displacement that will be patched into the instruction
             Displacement patch_displacement = pcRelativeDisplacement(literal_pool_base + 4*pf.pool_index, pf.instruction_offset);
@@ -381,11 +383,18 @@ void Assembler::flushLiteralPools() {
             // Byte4: DDDDDDDD
             section.bytes[pf.instruction_offset+3] = 0xFF & patch_displacement;
         }
-
+        // emit the actual literal pool bytes starting at end of section
         for(const LiteralPoolEntry &lp_entry : section.literal_pool) {
             if (lp_entry.is_symbol) {
-                relocateAgainst(lp_entry.symbol);
-                emitWord(0);
+                SymTab_entry &sym = symbol_table[lp_entry.symbol];
+                if(sym.section_index == ABS) {
+                    emitWord(sym.value);
+                } 
+                else {
+                    // symbol value will be known at link time, so emit relocation and 0 bytes for the hole now
+                    relocateAgainst(lp_entry.symbol);
+                    emitWord(0);
+                }
             }
             else {
                 // If literal, just emit the literal value
@@ -402,7 +411,7 @@ void Assembler::resolveRelocs() {
             const SymTab_entry &symbol = symbol_table[reloc.symbol];
 
             // Extern survives linking, absolute has no section: both stay as they are.
-            // If symbol is in the same file, then S is the section symbol which holds it, and its value will ultimately be the sections base address
+            // If symbol is in the same file, then S is the symbol of the section which holds it, and its value will ultimately be the sections base address
             // Otherwise, if the symbol that we need is extern, A = 0 and S will be the full resolved address of that symbol from the other file
             if (symbol.section_index == UND || symbol.section_index == ABS)
                 continue;
@@ -428,7 +437,93 @@ void Assembler::handleWordLiteral(const std::uint32_t literal) {
     emitWord(literal);
 }
 
+void Assembler::defineEquSymbol(const std::string &symbol_name, const Expression &expression) {
+    SymIndex sym = getOrCreateSymbol(symbol_name);
+
+    if (symbol_table[sym].is_defined) {
+        error("bad equ directive. Multiple definitions for symbol: " + symbol_name);
+        return;
+    }
+    symbol_table[sym].is_defined = true;
+    
+    if (!evaluateExpression(sym, expression)) {
+        incalculatable_symbols_table.push_back({sym, expression});
+    }
+}
+
+bool Assembler::evaluateExpression(SymIndex sym, const Expression &expression) {
+    std::int32_t value = expression.constant; // end value of our expression, we build this over time
+    std::map<SymIndex, int> coefficients;
+    
+    for(const SymbolTerm &term : expression.terms) {
+        SymTab_entry &term_sym = symbol_table[getOrCreateSymbol(term.symbol_name)];
+
+        if (term_sym.is_extern) {
+            error("equ directive expression cannot contain external symbols");
+            return false;
+        }
+        else if(term_sym.section_index == UND) 
+            return false;
+        
+        // same for ABS and defined symbols
+        value += term.sign * term_sym.value; 
+        
+        if(term_sym.section_index != ABS) {
+            coefficients[term_sym.section_index] += term.sign;
+        }
+    }
+
+    // now check if relocatable, unresolvable, or absolute symbol
+    SymTab_entry &equ_entry = symbol_table[sym];
+    SymIndex equ_section = ABS;
+
+    for(const auto &[sctn, coefficient] : coefficients) {
+        if(coefficient == 0)
+            continue;
+        if(coefficient == 1 && equ_section) {
+            equ_section = sctn;
+            continue;
+        }
+        error("expression is neither absolute nor relative to a single section");
+        return false;
+    }
+    equ_entry.section_index = equ_section;
+    equ_entry.is_defined = true;
+    equ_entry.value = value;
+    
+    return true;
+}
+
+void Assembler::resolveEquSymbols() {
+    
+    // resolve symbols until the list is empty 
+    while(incalculatable_symbols_table.size() > 0) {
+        // iterate over the list, if the list doesnt resolve any symbol
+        // after one pass, symbols are unresolvable and it is an error
+        size_t previous_size = incalculatable_symbols_table.size();
+
+        incalculatable_symbols_table.erase(
+            std::remove_if(
+                incalculatable_symbols_table.begin(),
+                incalculatable_symbols_table.end(),
+                [this](auto &elem) {
+                    return evaluateExpression(elem.symtab_index, elem.expression);
+                }),
+            incalculatable_symbols_table.end());
+
+        // 2. If no symbols were resolved in this pass, we are stuck!
+        if (incalculatable_symbols_table.size() == previous_size) {
+            // Report error for remaining unresolvable / cyclic symbols
+            for (const auto &elem : incalculatable_symbols_table) {
+                error("Unresolvable or circular dependency in .equ symbol at index " + std::to_string(elem.symtab_index));
+            }
+            return;
+        }
+    }
+}
+
 void Assembler::endAssembly() {
+    resolveEquSymbols();
     resolveJumpFixups();
     flushLiteralPools();
     resolveRelocs();
@@ -453,7 +548,7 @@ void Assembler::writeObjectFile() {
             << toHex(entry.value, 8) << " "
             << (entry.type == Type::SCTN ? "SCTN" : "NOTYP") << " "
             << (entry.bind == Bind::GLOB ? "GLOB" : "LOC") << " "
-            << entry.section_index << " "
+            << (entry.section_index == ABS ? "ABS" : std::to_string(entry.section_index)) << " "
             << entry.name << "\n";
     }
 
@@ -499,10 +594,6 @@ static const char *operandKindName(InstructionOperandKind kind) {
 bool Assembler::displacementFromSymbol(const std::string &symbol_name, Displacement &disp) {
     SymIndex index = findSymbolByName(symbol_name);
 
-    if (index == UND || !symbol_table[index].is_defined) {
-        error("final value of " + symbol_name + " is not known at assembly time");
-        return false;
-    }
     if (symbol_table[index].section_index != ABS) {
         // Only a symbol produced by .equ has a value known at assembly time
         error(symbol_name + " is not an absolute symbol, so it cannot be a displacement");
@@ -556,6 +647,7 @@ void Assembler::emitInstructionViaPool(std::uint8_t oc,
                                        RegIndex regB, 
                                        RegIndex regC, 
                                        const InstructionOperand &operand) {
+    // TODO - we cant tell if an equ defined symbol is ABS (literal) or SYMBOL here yet
     std::uint16_t slot = getOrCreatePoolEntry(operand);
     if (slot == NO_LITERAL_POOL_ENTRY)
         return;
@@ -655,6 +747,7 @@ void Assembler::instructionLoad(const std::string &mnemonic,
             break;
 
         case InstructionOperandKind::RegisterSymbolOffset:
+            // TODO fix this after implementing equ, to check at the end of assembly if the equ based symbol can work
             if (!displacementFromSymbol(operand.symbol, disp))
                 return;
             emitInstruction(0x9, 0x2, gpr, operand.reg, 0, disp);

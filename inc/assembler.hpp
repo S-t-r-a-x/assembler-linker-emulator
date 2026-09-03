@@ -44,7 +44,7 @@ struct SymTab_entry {
     Bind bind = Bind::LOC;              
     SymIndex section_index = UND;   // index of the section it belongs to (can be NO_SECTION or ABS)
     std::string name;       
-    bool is_defined = false;        // for forward declarations 
+    bool is_defined = false;        // used to signify that a symbol has just been parsed (so maybe name change)
     bool is_extern = false;
  
     SymTab_entry(unsigned short index, const std::string &name) {
@@ -164,6 +164,12 @@ struct InstructionOperand {
     std::string symbol;
 };
 
+// necessary for .equ directive
+struct IncalcSymTab_entry {
+    SymIndex symtab_index; // Index of the symbol that we need to reevaluate
+    Expression expression; // expression that needs to be evaluated
+};
+
 class Assembler {
 public:
     Assembler(std::string write_path) {
@@ -218,6 +224,7 @@ public:
 private:
     std::vector<SymTab_entry> symbol_table;
     std::vector<Section> section_table;
+    std::vector<IncalcSymTab_entry> incalculatable_symbols_table; 
     SymIndex current_section; // index of the current section in the symbol table
     std::string write_path; // output file location
     unsigned int error_count = 0; // error handling
@@ -271,6 +278,10 @@ private:
     void makeJumpFixup(SymIndex symbol);
     // reads location counter, also must be called before emitting instruction
     void makePoolFixup(std::uint16_t pool_index);
+
+    // used for .equ defined expressions, true signifies resolve, false signifies no change
+    bool evaluateExpression(SymIndex sym, const Expression &expression);
+    void resolveEquSymbols();
 
     // called at .end
     void resolveJumpFixups();
