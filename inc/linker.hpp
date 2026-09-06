@@ -37,13 +37,13 @@ struct MergedSection {
     std::vector<Contribution> contributions;
 };
 
-// A definition other files can name. Locals never reach here: nothing outside
-// their own file can refer to one (see the linker notes in assumptions.md).
+// Where a symbol is actually defined. Doubles as the answer for a relocation
+// target, since resolving one is exactly the question "who defines this".
+// Locals never appear here: nothing outside their own file can name them.
 struct GlobalSymbol {
-    std::size_t file;
-    std::string section;        // the section it is defined in; empty when absolute
+    std::size_t file = 0;       // the file holding the definition
+    std::string section;        // section it lives in, empty means absolute
     std::uint32_t value = 0;    // offset in that section, or the value itself when absolute
-    bool is_absolute = false;
 };
 
 class Linker {
@@ -70,9 +70,14 @@ private:
     MergedSection *findContribution(std::size_t file, const std::string &name, std::uint32_t &offset);
     // Address the file's own contribution to that section starts at.
     bool sectionBase(std::size_t file, const std::string &name, std::uint32_t &base);
+    // That file's own section of this name, as it was read in.
+    const ObjSection *sourceSection(std::size_t file, const std::string &name) const;
+    // Who defines a relocation's target. False when nothing does, which is an
+    // error for -hex and just an import that survives for -relocatable.
+    bool definitionOf(std::size_t file, SymIndex symbol, GlobalSymbol &definition);
     // Final address of a relocation's target symbol. False if nothing defines it.
     bool symbolAddress(std::size_t file, SymIndex symbol, std::uint32_t &address);
-    static void patchWord(MergedSection &section, std::uint32_t offset, std::uint32_t value);
+    static void patchWord(std::vector<std::uint8_t> &bytes, std::uint32_t offset, std::uint32_t value);
 
     void mergeSections();
     void placeSections();
@@ -80,4 +85,5 @@ private:
     void collectGlobalSymbols();
     void resolveRelocations();
     bool writeHex();
+    void writeRelocatable();
 };
