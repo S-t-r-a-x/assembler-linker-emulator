@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 #include "objectfile.hpp"
@@ -11,9 +12,8 @@ struct Placement {
     std::uint32_t address;
 };
 
-// What the command line asked for: filled in by main, consumed by the linker.
-// Exactly one of hex and relocatable is set -- Project_specs.md:179 makes that
-// the condition for producing any output at all, so it is checked at parse time.
+// What the command line asked for, set by main
+// Exactly one of hex and relocatable has to be set, checked at parse time
 struct LinkerOptions {
     bool hex = false;
     bool relocatable = false;
@@ -37,6 +37,15 @@ struct MergedSection {
     std::vector<Contribution> contributions;
 };
 
+// A definition other files can name. Locals never reach here: nothing outside
+// their own file can refer to one (see the linker notes in assumptions.md).
+struct GlobalSymbol {
+    std::size_t file;
+    std::string section;        // the section it is defined in; empty when absolute
+    std::uint32_t value = 0;    // offset in that section, or the value itself when absolute
+    bool is_absolute = false;
+};
+
 class Linker {
 public:
     Linker(const LinkerOptions &options, const std::vector<ObjectFile> &input_files) : options(options), input_files(input_files) {}
@@ -48,6 +57,7 @@ private:
     LinkerOptions options;
     std::vector<ObjectFile> input_files;
     std::vector<MergedSection> merged_sections;
+    std::map<std::string, GlobalSymbol> global_symbols;
     unsigned error_count = 0;
 
     void error(const std::string &message);
@@ -56,7 +66,18 @@ private:
     // Finds the merged section of this name, creating an empty one on first sight.
     MergedSection &mergedSection(const std::string &name);
 
+    // The merged section this file's section became part of, and where in it.
+    MergedSection *findContribution(std::size_t file, const std::string &name, std::uint32_t &offset);
+    // Address the file's own contribution to that section starts at.
+    bool sectionBase(std::size_t file, const std::string &name, std::uint32_t &base);
+    // Final address of a relocation's target symbol. False if nothing defines it.
+    bool symbolAddress(std::size_t file, SymIndex symbol, std::uint32_t &address);
+    static void patchWord(MergedSection &section, std::uint32_t offset, std::uint32_t value);
+
     void mergeSections();
     void placeSections();
+    void checkOverlaps();
+    void collectGlobalSymbols();
+    void resolveRelocations();
     bool writeHex();
 };
