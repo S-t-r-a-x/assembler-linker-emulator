@@ -93,7 +93,5 @@ int main(int argc, char **argv) {
     }
 
     Linker linker(options, inputs);
-
-    std::cerr << "linker: read " << inputs.size() << " object file(s); linking not implemented yet\n";
-    return 1;
+    return linker.link() ? 0 : 1;
 }
