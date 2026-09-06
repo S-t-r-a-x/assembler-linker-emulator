@@ -6,16 +6,12 @@
 static_assert(__cplusplus >= 201703L,
               "This project requires C++17, build with -std=c++17");
 
-#include <climits>
 #include <string>
 #include <vector>
 #include <variant>
 #include <cstdint>
 
-enum class Type {
-    NOTYP,
-    SCTN
-};
+#include "objectfile.hpp"
 
 // Pending means a term is not defined yet, so retry at .end. Invalid is already reported
 enum class ExprResult {
@@ -24,12 +20,6 @@ enum class ExprResult {
     Invalid
 };
 
-enum class Bind {
-    LOC,
-    GLOB 
-};
-
-using SymIndex = unsigned short;
 using RegIndex = std::uint8_t;     // 0..15
 using Displacement = std::int32_t; // SIGNED
 
@@ -39,9 +29,6 @@ constexpr RegIndex SP = 14;
 constexpr RegIndex PC = 15;
 // CSR indices: status is 0, handler is 1, cause is 2.
 constexpr RegIndex CSR_STATUS = 0;
-
-static constexpr SymIndex UND = 0;
-constexpr SymIndex ABS = USHRT_MAX;
 
 struct SymTab_entry {
     /*  Symbol table entry */    
@@ -102,12 +89,6 @@ struct PoolFixup {
 struct JumpFixup {
     std::uint32_t instruction_offset;
     SymIndex symbol;
-};
-
-struct Reloc {
-    std::uint32_t offset;   // offset from section start to the hole that needs to be patched up
-    std::uint32_t addend;   // A - the offset of the symbol that needs to be relocated from the section start
-    SymIndex symbol;        // S - the symbol being relocated against
 };
 
 static constexpr SymIndex NO_SECTION = UND;

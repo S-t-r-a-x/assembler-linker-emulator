@@ -19,19 +19,22 @@
 - Once decided, move the resolution to `assumptions.md`.
 - Introduce Byte for std::uint8_t and Word for std::uint32_t and refactor the code so it uses the new types, for readability
 
-## `.equ` symbols should not go through the pool as relocations
+## [low] `.equ` symbols and literals don't share a pool slot
 
-- `getOrCreatePoolEntry` makes a `SYMBOL` entry for every `ImmediateSymbol` /
-  `MemorySymbol` operand ([assembler.cpp](src/asembler/assembler.cpp)),
-  and `resolveRelocs` skips symbols with `section_index == ABS`. So an absolute
-  symbol currently ships as an `R_32` against a symbol with no section, with a
-  zero word in the pool — a case the linker would have to invent a rule for.
-- An `.equ` value is known at assembly time. It should become a `LITERAL` entry
-  holding that value, with no relocation at all, exactly like a wide literal.
-- Not live yet: `.equ` is still a stub ([parser.y](misc/parser.y)).
-  Fix it when level C lands, before the linker learns any ABS handling.
-- Note the dedup consequence: an `.equ` symbol and a literal of the same value
-  then share one slot, which is correct and free.
+- The original worry here — an absolute `.equ` symbol shipping as an `R_32`
+  against a symbol with no section, leaving the linker a case to invent a rule
+  for — is **fixed**. `flushLiteralPools` now emits `sym.value` directly when
+  `section_index == ABS` ([assembler.cpp:396-400](src/asembler/assembler.cpp#L396-L400)),
+  so no relocation is generated.
+- Fixed at *emit* time rather than at *entry* time, though. The plan had been
+  to make `getOrCreatePoolEntry` build a `LITERAL` entry holding the value, in
+  which case an `.equ` symbol and a literal of the same value would dedup into
+  one slot for free.
+- As it stands they don't: `LiteralPoolEntry` equality compares `is_symbol`
+  first, so `.equ x, 5` and a literal `5` in the same section take two words.
+- Emitted bytes are correct either way. This is a handful of wasted pool
+  bytes, nothing more — only worth doing if the pool entry code is being
+  touched anyway.
 
 ## [low] Pool slot lookup by SymIndex
 
@@ -81,3 +84,29 @@ std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
   that today, but the EOF path would reintroduce it without the guard.
 - Skip the call and error instead if you would rather a truncated file fail
   loudly: `.end` is the only signal that a file is complete. Same one line.
+
+## Decide: what `int` does to the status register
+
+- Moved here from my notes — it is an open decision, and those live in this
+  file.
+- The `int` pseudocode in the spec says `status <= status & ~0x1`, which
+  *clears* the timer mask bit, but the prose says interrupts are globally
+  masked on entry (and 1 = masked). The two readings contradict each other.
+- Decide when building the emulator, then keep assembler and emulator
+  consistent — `iret` already assumes a push order that has to mirror whatever
+  this resolves to (see the `iret` entry in `assumptions.md`).
+- Once decided, move the resolution to `assumptions.md`.
+
+## [low] Where the built executables land: `bin/` vs project root
+
+- The Makefile builds `bin/asembler`, but the spec invokes `./asembler` from
+  the project root ([Project_specs.md:59](Project_specs.md#L59), and again in
+  the worked example at
+  [504-505](Project_specs.md#L504-L505)).
+- Unclear whether the defense harness cds into the submission root and runs
+  `./asembler` literally, or whether having them under `bin/` is fine. If it's
+  the former, `bin/` fails the run outright — and it is cheap to hedge.
+- Options: (1) build straight into the project root; (2) keep `bin/` and have
+  the default target also drop root-level copies or symlinks.
+- Not urgent, but note the failure mode is submission-day and total, not a
+  code bug that shows up in testing.

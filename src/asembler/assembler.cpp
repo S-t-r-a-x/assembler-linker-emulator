@@ -1,19 +1,7 @@
 #include "../../inc/assembler.hpp"
 #include <iostream>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
 #include <algorithm>
 #include <map>
-
-// Cosmetic, but must stay fixed so re-emitting a parsed object file reproduces it exactly.
-static constexpr std::size_t BYTES_PER_LINE = 16;
-
-static std::string toHex(std::uint32_t value, int width) {
-    std::ostringstream stream;
-    stream << std::hex << std::setfill('0') << std::setw(width) << value;
-    return stream.str();
-}
 
 SymIndex Assembler::findSymbolByName(const std::string &entry_name) const {
     for (const SymTab_entry& entry : symbol_table) {
@@ -544,49 +532,22 @@ void Assembler::endAssembly() {
 }
 
 void Assembler::writeObjectFile() {
-    std::ofstream out(write_path);
-    if (!out) {
-        error("cannot open output file: " + write_path);
-        return;
-    }
+    ObjectFile obj;
 
-    // Symbol 0 is the null entry, manually write it out
-    out << "SYMTAB " << symbol_table.size() - 1 << "\n";
-    for (const SymTab_entry &entry : symbol_table) {
-        if (entry.index == UND)
-            continue;
-
-        out << entry.index << " "
-            << toHex(entry.value, 8) << " "
-            << (entry.type == Type::SCTN ? "SCTN" : "NOTYP") << " "
-            << (entry.bind == Bind::GLOB ? "GLOB" : "LOC") << " "
-            << (entry.section_index == ABS ? "ABS" : std::to_string(entry.section_index)) << " "
-            << entry.name << "\n";
-    }
+    for (const SymTab_entry &entry : symbol_table)
+        obj.symbols.push_back({entry.index, entry.value, entry.type,
+                               entry.bind, entry.section_index, entry.name});
 
     for (const Section &section : section_table) {
-        out << "\nSECTION " << symbol_table[section.symTab_index].name
-            << " " << section.bytes.size() << "\n";
-
-        for (std::size_t i = 0; i < section.bytes.size(); i++) {
-            out << toHex(section.bytes[i], 2);
-            bool end_of_line = (i + 1) % BYTES_PER_LINE == 0;
-            bool last_byte = i + 1 == section.bytes.size();
-            out << (end_of_line || last_byte ? "\n" : " ");
-        }
-
-        if (section.relocs.empty())
-            continue;
-
-        out << "\nRELOC " << symbol_table[section.symTab_index].name
-            << " " << section.relocs.size() << "\n";
-
-        for (const Reloc &reloc : section.relocs) {
-            out << toHex(reloc.offset, 8) << " "
-                << reloc.symbol << " "
-                << toHex(reloc.addend, 8) << "\n";
-        }
+        ObjSection out_section;
+        out_section.name = symbol_table[section.symTab_index].name;
+        out_section.bytes = section.bytes;
+        out_section.relocs = section.relocs;
+        obj.sections.push_back(std::move(out_section));
     }
+
+    if (!objfile::write(write_path, obj))
+        error("cannot open output file: " + write_path);
 }
 
 static const char *operandKindName(InstructionOperandKind kind) {
