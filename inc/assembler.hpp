@@ -1,16 +1,11 @@
 #pragma once
 
-// The defense VM's g++ 9.4 defaults to gnu++14 but supports -std=c++17 fully;
-// the Makefile passes the flag. Fail loudly if it ever goes missing, rather
-// than with pages of template errors from std::variant below.
-static_assert(__cplusplus >= 201703L,
-              "This project requires C++17, build with -std=c++17");
-
 #include <string>
 #include <vector>
 #include <variant>
 #include <cstdint>
 
+#include "isa.hpp"
 #include "objectfile.hpp"
 
 // Pending means a term is not defined yet, so retry at .end. Invalid is already reported
@@ -19,16 +14,6 @@ enum class ExprResult {
     Pending,
     Invalid
 };
-
-using RegIndex = std::uint8_t;     // 0..15
-using Displacement = std::int32_t; // SIGNED
-
-// The two general purpose registers with a second name in the ISA.
-// Stack grows downwards, and SP points ot the adress of the occupied adress at the top of the stack
-constexpr RegIndex SP = 14;
-constexpr RegIndex PC = 15;
-// CSR indices: status is 0, handler is 1, cause is 2.
-constexpr RegIndex CSR_STATUS = 0;
 
 struct SymTab_entry {
     /*  Symbol table entry */    
@@ -108,23 +93,6 @@ struct Section {
 
     std::uint32_t getLocationCounter() const { return bytes.size(); }
 };
-
-// Shared with the emulator, which decodes the same field. Cast unsigned values with
-// static_cast<Displacement> first: the field is sign extended when executed, so
-// 0xFFFFFEFE is -258 and does fit.
-constexpr Displacement DISPLACEMENT_MIN = -2048;
-constexpr Displacement DISPLACEMENT_MAX = 2047;
-
-constexpr bool fitsInDisplacement(Displacement disp) {
-    return disp >= DISPLACEMENT_MIN && disp <= DISPLACEMENT_MAX;
-}
-
-// PC is incremented before execute, so a pc-relative field is measured from the
-// instruction after this one, so we need to decrement the displacement by another word
-// Both arguments are offsets within the same section, or both addresses
-constexpr Displacement pcRelativeDisplacement(std::uint32_t target, std::uint32_t instruction) {
-    return static_cast<Displacement>(target) - static_cast<Displacement>(instruction) - 4;
-}
 
 // The jump family has a direct and a memory indirect form that differ by one MOD bit:
 // bit 0 for call (OC 2), bit 3 for jmp and the branches (OC 3).

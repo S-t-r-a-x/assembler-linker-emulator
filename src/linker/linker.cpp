@@ -1,14 +1,11 @@
 #include "../../inc/linker.hpp"
+#include "../../inc/hexfile.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <sstream>
-
-// Project_specs.md:174-176 lays the record out eight bytes to a row.
-static constexpr std::uint32_t BYTES_PER_ROW = 8;
-static constexpr std::uint32_t ROW_MASK = ~(BYTES_PER_ROW - 1);
 
 // Upper case, as the example record in the spec is.
 static std::string toHex(std::uint32_t value, int width) {
@@ -74,40 +71,18 @@ void Linker::placeSections() {
 }
 
 bool Linker::writeHex() {
-    // Sorted by address, which is what lets the emitter walk rows in order.
-    std::map<std::uint32_t, std::uint8_t> memory;
+    // The layout of the record is hexfile's business; all the linker owes it is
+    // which byte ended up at which address.
+    hexfile::Image image;
     for (const MergedSection &section : merged_sections)
         for (std::size_t i = 0; i < section.bytes.size(); i++)
-            memory[section.address + static_cast<std::uint32_t>(i)] = section.bytes[i];
+            image[section.address + static_cast<std::uint32_t>(i)] = section.bytes[i];
 
-    std::ofstream out(options.output_path);
-    if (!out) {
+    if (!hexfile::write(options.output_path, image)) {
         error("cannot open output file: " + options.output_path);
         return false;
     }
-
-    for (auto it = memory.begin(); it != memory.end(); ) {
-        std::uint32_t row = it->first & ROW_MASK;
-
-        // Rows are emitted only when they hold something, and stop after the
-        // last byte they hold, so a gap between sections costs no output.
-        auto next = it;
-        std::uint32_t last = it->first;
-        while (next != memory.end() && (next->first & ROW_MASK) == row)
-            last = next++->first;
-
-        // Counted in 64 bits on purpose: a section ending at 0xFFFFFFFF is
-        // legal, and a uint32_t counter would wrap past `last` and never stop.
-        out << toHex(row, 8) << ":";
-        for (std::uint64_t address = row; address <= last; address++) {
-            auto byte = memory.find(static_cast<std::uint32_t>(address));
-            out << " " << toHex(byte == memory.end() ? 0 : byte->second, 2);
-        }
-        out << "\n";
-        it = next;
-    }
-
-    return out.good();
+    return true;
 }
 
 // An empty section occupies nothing and so cannot clash with anything.

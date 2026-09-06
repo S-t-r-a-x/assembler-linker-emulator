@@ -1,6 +1,6 @@
-# Root build for the whole toolchain: asembler, linker (later: emulator).
+# Root build for the whole toolchain: asembler, linker, emulator.
 #
-#   make            build bin/asembler and bin/linker
+#   make            build bin/asembler, bin/linker and bin/emulator
 #   make parser     generate + compile just the bison parser (fast error check)
 #   make lexer      generate + compile just the flex lexer (fast error check)
 #   make clean
@@ -20,15 +20,16 @@ INC_DIR   := inc
 # have its own target pattern instead of sharing one.
 ASEMBLER_BUILD := $(BUILD_DIR)/asembler
 LINKER_BUILD   := $(BUILD_DIR)/linker
+EMULATOR_BUILD := $(BUILD_DIR)/emulator
 COMMON_BUILD   := $(BUILD_DIR)/common
 
 .PHONY: all parser lexer clean help
 
-all: $(BIN_DIR)/asembler $(BIN_DIR)/linker
+all: $(BIN_DIR)/asembler $(BIN_DIR)/linker $(BIN_DIR)/emulator
 
 help:
 	@echo "Available targets:"
-	@echo "  make            - build bin/asembler and bin/linker (default)"
+	@echo "  make            - build bin/asembler, bin/linker and bin/emulator (default)"
 	@echo "  make parser     - generate + compile the bison parser only, no link"
 	@echo "                    (catches grammar conflicts and C++ errors in actions fast)"
 	@echo "  make lexer      - generate + compile the flex lexer only, no link"
@@ -36,8 +37,9 @@ help:
 	@echo "  make help       - show this message"
 
 # --- shared -----------------------------------------------------------
-# src/common holds what more than one tool needs -- currently the object file
-# format, which asembler writes and linker reads.
+# src/common holds what more than one tool needs: the object file format, which
+# asembler writes and linker reads, and the memory image format, which linker
+# writes and emulator reads.
 $(COMMON_BUILD)/%.o: src/common/%.cpp | $(COMMON_BUILD)
 	$(CXX) $(CXXFLAGS) -I$(INC_DIR) -c -o $@ $<
 
@@ -97,17 +99,27 @@ $(LINKER_BUILD)/%.o: src/linker/%.cpp | $(LINKER_BUILD)
 	$(CXX) $(CXXFLAGS) -I$(INC_DIR) -c -o $@ $<
 
 LINKER_OBJS := $(LINKER_BUILD)/main.o $(LINKER_BUILD)/linker.o \
-               $(COMMON_BUILD)/objectfile.o
+               $(COMMON_BUILD)/objectfile.o $(COMMON_BUILD)/hexfile.o
 
 $(BIN_DIR)/linker: $(LINKER_OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -o $@ $(LINKER_OBJS)
+
+# --- emulator ---------------------------------------------------------
+$(EMULATOR_BUILD)/%.o: src/emulator/%.cpp | $(EMULATOR_BUILD)
+	$(CXX) $(CXXFLAGS) -I$(INC_DIR) -c -o $@ $<
+
+EMULATOR_OBJS := $(EMULATOR_BUILD)/main.o $(EMULATOR_BUILD)/emulator.o \
+                 $(EMULATOR_BUILD)/terminal.o $(COMMON_BUILD)/hexfile.o
+
+$(BIN_DIR)/emulator: $(EMULATOR_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -o $@ $(EMULATOR_OBJS)
 
 # One .d per object, now one level deeper than before.
 -include $(wildcard $(BUILD_DIR)/*/*.d)
 
 # Independent targets sharing one recipe -- each directory is made on its own.
 # Not a grouped target (`&:`), which would need make 4.3.
-$(BIN_DIR) $(ASEMBLER_BUILD) $(LINKER_BUILD) $(COMMON_BUILD):
+$(BIN_DIR) $(ASEMBLER_BUILD) $(LINKER_BUILD) $(EMULATOR_BUILD) $(COMMON_BUILD):
 	mkdir -p $@
 
 clean:

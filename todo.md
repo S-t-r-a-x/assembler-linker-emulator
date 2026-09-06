@@ -85,18 +85,6 @@ std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
 - Skip the call and error instead if you would rather a truncated file fail
   loudly: `.end` is the only signal that a file is complete. Same one line.
 
-## Decide: what `int` does to the status register
-
-- Moved here from my notes — it is an open decision, and those live in this
-  file.
-- The `int` pseudocode in the spec says `status <= status & ~0x1`, which
-  *clears* the timer mask bit, but the prose says interrupts are globally
-  masked on entry (and 1 = masked). The two readings contradict each other.
-- Decide when building the emulator, then keep assembler and emulator
-  consistent — `iret` already assumes a push order that has to mirror whatever
-  this resolves to (see the `iret` entry in `assumptions.md`).
-- Once decided, move the resolution to `assumptions.md`.
-
 ## [low] Where the built executables land: `bin/` vs project root
 
 - The Makefile builds `bin/asembler`, but the spec invokes `./asembler` from
