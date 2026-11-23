@@ -1,7 +1,7 @@
 #pragma once
 
 // The object file format: the only contract between asembler and linker.
-// These structs are the on-disk record shape, nothing more -- the assembler's
+// These structs are the on-disk record shape, nothing more; the assembler's
 // richer Section/SymTab_entry (literal pools, fixups, is_extern) stay private
 // to it, and the linker's merge-time structures stay private to the linker.
 // Both meet here, so the format is written down exactly once.
@@ -66,7 +66,7 @@ bool write(const std::string &path, const ObjectFile &obj);
 
 // Throws std::runtime_error, worded with the offending line, on anything
 // malformed. Object files are machine-generated, so a deviation is a bug or a
-// corrupt file -- never something worth recovering from.
+// corrupt file, never something worth recovering from.
 ObjectFile read(const std::string &path);
 
 } // namespace objfile

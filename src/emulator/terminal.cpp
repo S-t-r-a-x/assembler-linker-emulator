@@ -4,9 +4,9 @@
 #include <iostream>
 
 Terminal::Terminal() {
-    // Non-blocking first, and unconditionally: raw mode's VMIN = 0 only covers
-    // stdin being a tty, and a read from a pipe with nothing in it would
-    // otherwise stall the emulation until something arrived.
+    // Set non-blocking unconditionally: raw mode's VMIN = 0 only helps when
+    // stdin is a tty. If stdin is a pipe instead, a read would otherwise
+    // block the whole emulation until data showed up.
     saved_flags = fcntl(STDIN_FILENO, F_GETFL);
     if (saved_flags != -1)
         fcntl(STDIN_FILENO, F_SETFL, saved_flags | O_NONBLOCK);
@@ -15,9 +15,9 @@ Terminal::Terminal() {
         return;                 // not a tty, so there are no attributes to change
 
     termios raw = saved_attributes;
-    // ICANON off delivers each key as it is pressed rather than a line at a
-    // time, ECHO off keeps the terminal from displaying it. ISIG stays on
-    // deliberately, so ctrl+C can still stop a runaway user program.
+    // ICANON off: keys arrive as pressed, not buffered by line. ECHO off:
+    // keystrokes aren't echoed. ISIG stays on deliberately, so ctrl+C can
+    // still kill a runaway program.
     raw.c_lflag &= ~(ICANON | ECHO);
     // Return whatever is there and never wait for more.
     raw.c_cc[VMIN] = 0;

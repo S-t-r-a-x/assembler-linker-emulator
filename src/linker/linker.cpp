@@ -28,8 +28,8 @@ MergedSection &Linker::mergedSection(const std::string &name) {
     return merged_sections.back();
 }
 
-// Files in command line order, sections in definition order. That order is what
-// Project_specs.md:152 fixes, and it decides both aggregation and default layout.
+// Files in command line order, sections in definition order. That fixed
+// order decides both aggregation and default layout.
 void Linker::mergeSections() {
     for (std::size_t file = 0; file < input_files.size(); file++) {
         for (const ObjSection &section : input_files[file].sections) {
@@ -55,9 +55,8 @@ void Linker::placeSections() {
         }
     }
 
-    // Unplaced sections follow the end of the highest placed one, or start at
-    // zero when nothing was placed. One cursor, no special case. Packed with
-    // no padding between them, per Project_specs.md:152.
+    // Unplaced sections pack tightly right after the last placed one (or start
+    // at zero if nothing was placed): one cursor, no special-casing.
     for (std::size_t i = 0; i < merged_sections.size(); i++) {
         if (placed[i])
             continue;
@@ -71,8 +70,8 @@ void Linker::placeSections() {
 }
 
 bool Linker::writeHex() {
-    // The layout of the record is hexfile's business; all the linker owes it is
-    // which byte ended up at which address.
+    // hexfile owns the record layout; the linker just says which byte
+    // ended up at which address.
     hexfile::Image image;
     for (const MergedSection &section : merged_sections)
         for (std::size_t i = 0; i < section.bytes.size(); i++)
@@ -206,7 +205,7 @@ bool Linker::symbolAddress(std::size_t file, SymIndex symbol, std::uint32_t &add
     return true;
 }
 
-// Data is little endian, and every R_32 hole is a data word --
+// Data is little endian, and every R_32 hole is a data word:
 // literal pool slots and .word initialisers both.
 void Linker::patchWord(std::vector<std::uint8_t> &bytes, std::uint32_t offset, std::uint32_t value) {
     for (unsigned i = 0; i < 4; i++)
@@ -233,9 +232,9 @@ void Linker::resolveRelocations() {
     }
 }
 
-// -relocatable writes another object file, so relocations are kept and rewritten
-// rather than consumed. Locals are dropped, which is exactly what the assembler's
-// relocation rule bought us: no record ever points at one.
+// -relocatable outputs another object file, so relocations get rewritten rather
+// than resolved. Locals are dropped entirely: the assembler's relocation rule
+// guarantees no record ever points at one.
 void Linker::writeRelocatable() {
     ObjectFile out;
     std::map<std::string, SymIndex> index_of;   // output symbol index, by name
@@ -310,8 +309,8 @@ void Linker::writeRelocatable() {
                     continue;
                 }
 
-                // point it at the merged section symbol, and fold the symbol's own
-                // offset within that section into the addend
+                // point it at the merged section symbol, folding the symbol's
+                // own offset into the addend
                 std::uint32_t base = 0;
                 findContribution(definition.file, definition.section, base);
                 section.relocs.push_back({offset, reloc.addend + base + definition.value,
@@ -331,8 +330,8 @@ bool Linker::link() {
     if (hadError())
         return false;
 
-    // sections get no addresses here, Project_specs.md:181 ignores -place
-    // outright, so there is nothing to place and nothing that can overlap
+    // sections get no addresses here: -relocatable ignores -place outright,
+    // so there is nothing to place and nothing that can overlap
     if (options.relocatable) {
         writeRelocatable();
         return !hadError();

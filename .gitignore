@@ -23,3 +23,5 @@
 *.txt
 
 a.out
+# Linker output
+*.hex

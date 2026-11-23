@@ -168,8 +168,8 @@ bool Emulator::executeJump(const Instruction &instruction) {
     return true;
 }
 
-// The three arithmetic, logical and shift opcodes share one shape --
-// gpr[A] <= gpr[B] op gpr[C] -- so only the operation differs between them.
+// Arithmetic, logic and shift all share one shape, gpr[A] <= gpr[B] op gpr[C];
+// only the operation itself differs.
 bool Emulator::executeAlu(const Instruction &instruction) {
     const Word left = gpr[instruction.regB];
     const Word right = gpr[instruction.regC];
@@ -181,8 +181,8 @@ bool Emulator::executeAlu(const Instruction &instruction) {
                 case 0x0: result = left + right; break;
                 case 0x1: result = left - right; break;
                 case 0x2: result = left * right; break;
-                // Division by zero has no value the ISA could produce, so it is
-                // one of the combinations Project_specs.md:403 calls an error.
+                // Division by zero has no value the ISA could produce, so it's
+                // treated as an error.
                 case 0x3:
                     if (right == 0)
                         return false;
@@ -242,8 +242,8 @@ bool Emulator::executeStore(const Instruction &instruction) {
     return false;
 }
 
-// One case per MOD, in the order Project_specs.md:394-401 lists them. Every
-// case naming a control and status register is guarded: only three exist.
+// One case per MOD, in the order the spec lists them. Every case naming a
+// control and status register is guarded: only three exist.
 bool Emulator::executeLoad(const Instruction &instruction) {
     const RegIndex regA = instruction.regA;
     const RegIndex regB = instruction.regB;
@@ -293,10 +293,9 @@ bool Emulator::executeLoad(const Instruction &instruction) {
     return false;
 }
 
-// Status word then return address, in that order, and then interrupts are
-// masked globally (Project_specs.md:256). The pushed pc is the one after the
-// interrupted instruction, so iret resumes past it -- including past the bad
-// instruction that caused a cause 1 entry.
+// Pushes status then return address, then masks interrupts globally. The
+// saved pc already points past the interrupted instruction, so iret resumes
+// after it, even after a bad instruction that triggered a cause-1 entry.
 void Emulator::enterInterrupt(Cause cause) {
     push(csr[CSR_STATUS]);
     push(gpr[PC]);
@@ -306,8 +305,8 @@ void Emulator::enterInterrupt(Cause cause) {
 }
 
 std::chrono::milliseconds Emulator::timerPeriod() const {
-    // Project_specs.md:425. The register is a word wide but only eight periods
-    // exist, so the selection is the low three bits.
+    // The register is a word wide but only eight periods exist, so the
+    // selection is the low three bits.
     static constexpr unsigned periods_ms[8] = {500, 1000, 1500, 2000, 5000, 10000, 30000, 60000};
     return std::chrono::milliseconds(periods_ms[tim_cfg & 0x7]);
 }
@@ -323,8 +322,8 @@ bool Emulator::timerExpired() {
 }
 
 void Emulator::serviceInterrupts() {
-    // The peripherals run whether or not the processor is listening: a keystroke
-    // lands in term_in and a period elapses even while the request is masked.
+    // Peripherals keep running whether or not the processor is listening: a
+    // keystroke still lands in term_in, and the timer still ticks, even masked.
     const int key = terminal.readKey();
     if (key >= 0) {
         term_in = Word(key);
@@ -355,8 +354,8 @@ void Emulator::run() {
         if (!execute(instruction))
             enterInterrupt(Cause::BadInstruction);
 
-        // Requests are served only between instructions, never inside one
-        // (Project_specs.md:256), and halt is the end of everything.
+        // Requests are served only between instructions, never inside one,
+        // and halt is the end of everything.
         if (!halted)
             serviceInterrupts();
     }

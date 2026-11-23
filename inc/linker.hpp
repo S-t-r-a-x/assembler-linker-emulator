@@ -22,9 +22,8 @@ struct LinkerOptions {
     std::vector<std::string> input_paths;
 };
 
-// Where one input file's section landed inside the merged section of that name.
-// Every address the linker computes is merged.address + offset + a local offset,
-// so this table is the only bookkeeping the later passes need.
+// Where one input file's section landed inside the merged section.
+// merged.address + offset + a local offset gives any address the linker needs.
 struct Contribution {
     std::size_t file;       // indexes input_files, and options.input_paths alongside it
     std::uint32_t offset;   // start of this file's chunk within the merged section
@@ -37,9 +36,8 @@ struct MergedSection {
     std::vector<Contribution> contributions;
 };
 
-// Where a symbol is actually defined. Doubles as the answer for a relocation
-// target, since resolving one is exactly the question "who defines this".
-// Locals never appear here: nothing outside their own file can name them.
+// Where a symbol is defined, which also answers "who does this relocation
+// target?" Locals never show up here, since nothing outside their file can name them.
 struct GlobalSymbol {
     std::size_t file = 0;       // the file holding the definition
     std::string section;        // section it lives in, empty means absolute
@@ -72,8 +70,8 @@ private:
     bool sectionBase(std::size_t file, const std::string &name, std::uint32_t &base);
     // That file's own section of this name, as it was read in.
     const ObjSection *sourceSection(std::size_t file, const std::string &name) const;
-    // Who defines a relocation's target. False when nothing does, which is an
-    // error for -hex and just an import that survives for -relocatable.
+    // Who defines a relocation's target; false if nobody does (an error for
+    // -hex, a surviving import for -relocatable).
     bool definitionOf(std::size_t file, SymIndex symbol, GlobalSymbol &definition);
     // Final address of a relocation's target symbol. False if nothing defines it.
     bool symbolAddress(std::size_t file, SymIndex symbol, std::uint32_t &address);

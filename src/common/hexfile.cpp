@@ -5,7 +5,7 @@
 #include <sstream>
 #include <stdexcept>
 
-// Project_specs.md:174-176 lays the record out eight bytes to a row.
+// The spec lays the record out eight bytes to a row.
 static constexpr std::uint32_t BYTES_PER_ROW = 8;
 static constexpr std::uint32_t ROW_MASK = ~(BYTES_PER_ROW - 1);
 

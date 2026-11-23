@@ -9,8 +9,8 @@
 #include "isa.hpp"
 #include "terminal.hpp"
 
-// Both a cold and a warm restart start here (Project_specs.md:226), which is
-// why every public test places its code section at exactly this address.
+// Both a cold and a warm restart start here, which is why every public test
+// places its code section at exactly this address.
 constexpr Word RESET_ADDRESS = 0x40000000;
 
 // Flags in the low bits of the status register. A set bit masks, a clear bit
@@ -19,7 +19,7 @@ constexpr Word STATUS_TIMER_MASKED = 0x1;
 constexpr Word STATUS_TERMINAL_MASKED = 0x2;
 constexpr Word STATUS_INTERRUPTS_MASKED = 0x4;
 
-// What the handler finds in the cause register (Project_specs.md:251-254).
+// What the handler finds in the cause register.
 enum class Cause : Word {
     BadInstruction = 1,
     Timer = 2,
@@ -48,9 +48,8 @@ enum Opcode : Byte {
     OC_LOAD = 0x9
 };
 
-// 2^32 bytes of address space, of which a program touches a handful of pages.
-// A page appears on first write, so anything never written reads back as zero
-// and costs nothing.
+// 2^32 bytes of address space, though a program only ever touches a handful of
+// pages. A page is allocated on first write; anything untouched reads back as zero.
 class Memory {
 public:
     Byte readByte(Word address) const;
@@ -89,9 +88,9 @@ private:
     Terminal terminal;
     bool halted = false;
 
-    // A peripheral's request line, raised when it wants attention and lowered
-    // when the processor takes it. One bit each: a second request that arrives
-    // before the first is served does not queue up behind it.
+    // A peripheral's request line: set when it wants attention, cleared once
+    // served. Just one bit, so a second request arriving before the first is
+    // served gets lost rather than queued.
     bool timer_pending = false;
     bool terminal_pending = false;
 
@@ -109,8 +108,8 @@ private:
 
     Instruction fetch();
 
-    // False for a combination the ISA has no reasonable interpretation of
-    // (Project_specs.md:403); run() turns that into a cause 1 interrupt.
+    // False for any encoding the ISA gives no meaning to; run() turns that
+    // into a cause-1 interrupt.
     bool execute(const Instruction &instruction);
     bool executeJump(const Instruction &instruction);
     bool executeAlu(const Instruction &instruction);
