@@ -272,6 +272,8 @@ keys reach the program the moment they are pressed. stdin is also made
 non-blocking, so the emulator keeps running when nobody types and when input
 is piped. Ctrl+C is deliberately left working, because otherwise a program
 stuck in a loop could not be stopped from the terminal it has taken over.
+A signal kills the process without running destructors, so a handler restores
+the terminal first and then re-raises the signal.
 
 ## Building on an old toolchain
 

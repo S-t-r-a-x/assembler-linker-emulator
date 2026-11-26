@@ -1,9 +1,19 @@
 #include "../../inc/terminal.hpp"
 #include <fcntl.h>
 #include <unistd.h>
+#include <csignal>
 #include <iostream>
 
+// A signal handler is a plain function, so this is how it finds the tty state.
+static Terminal *active_terminal = nullptr;
+
 Terminal::Terminal() {
+    // Installed first, so the handler is in place before the tty is touched.
+    active_terminal = this;
+    std::signal(SIGINT, onSignal);
+    std::signal(SIGQUIT, onSignal);
+    std::signal(SIGTERM, onSignal);
+
     // Set non-blocking unconditionally: raw mode's VMIN = 0 only helps when
     // stdin is a tty. If stdin is a pipe instead, a read would otherwise
     // block the whole emulation until data showed up.
@@ -27,10 +37,28 @@ Terminal::Terminal() {
 }
 
 Terminal::~Terminal() {
+    restore();
+    active_terminal = nullptr;
+}
+
+void Terminal::restore() {
     if (raw_mode)
         tcsetattr(STDIN_FILENO, TCSANOW, &saved_attributes);
     if (saved_flags != -1)
         fcntl(STDIN_FILENO, F_SETFL, saved_flags);
+    raw_mode = false;
+    saved_flags = -1;
+}
+
+// Only async-signal-safe calls in here: the signal can arrive anywhere,
+// including in the middle of an iostream write, so exit() is off limits.
+// Re-raising with the default action still kills the process, and the shell
+// sees that it died of the signal, as it would have without this handler.
+void Terminal::onSignal(int signal_number) {
+    if (active_terminal)
+        active_terminal->restore();
+    std::signal(signal_number, SIG_DFL);
+    std::raise(signal_number);
 }
 
 int Terminal::readKey() {
