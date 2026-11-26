@@ -10,11 +10,6 @@ A complete toolchain for a small custom 32-bit processor, written in C++17:
 - **`emulator`**: an interpreter that loads the memory image and runs it,
   with a memory-mapped terminal and timer driven by interrupts.
 
-This was the semester project for *Systems Software* (13E113SS) at the
-School of Electrical Engineering, University of Belgrade. The tool names, the
-ISA and the command-line interface are fixed by the assignment. All the design
-choices inside them were left to the student.
-
 ## Quick start
 
 Requires `g++` with C++17, GNU `make`, `flex` and `bison` (3.5 or newer).
@@ -148,3 +143,10 @@ A few corner cases are handled conservatively rather than fully. For example,
 a `[%reg + symbol]` operand whose `.equ` symbol is defined later in the file is
 rejected, and a file without `.end` produces no output. They are listed with
 possible fixes in [todo.md](todo.md).
+
+## Background
+
+This was the semester project for *Systems Software* (13E113SS) at the
+School of Electrical Engineering, University of Belgrade. The tool names, the
+ISA and the command-line interface are fixed by the assignment. All the design
+choices inside them were left to the student.
