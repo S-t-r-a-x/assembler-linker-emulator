@@ -2,10 +2,9 @@
 
 ## Decide: `.extern foo` and `foo:` in the same file
 
-- The spec doesn't forbid it — `.global` exports, `.extern` imports, nothing more
-  ([Project_specs.md:77-80](Project_specs.md#L77-L80)). GNU `as` ignores `.extern`
-  entirely. So this is my call to make.
-- It matters because the locked relocation rule branches on exactly this bit:
+- The spec doesn't forbid it — `.global` exports, `.extern` imports, nothing more.
+  GNU `as` ignores `.extern` entirely. So this is my call to make.
+- It matters because the relocation rule ([DESIGN.md](DESIGN.md)) branches on exactly this bit:
   defined here → relocate against the **section symbol** (addend = offset);
   undefined/extern → relocate against **the symbol itself** (addend 0). A symbol
   that is both leaves `relocateAgainst()` without a rule.
@@ -16,7 +15,7 @@
 - Whichever way, the check must be **symmetric** — right now neither ordering is
   caught: `defineLabel` ignores `is_extern`, `declareExtern` ignores `is_defined`.
 - Not urgent: nothing reads `is_extern` until relocations land.
-- Once decided, move the resolution to `assumptions.md`.
+- Once decided, move the resolution to `DESIGN.md`.
 - Introduce Byte for std::uint8_t and Word for std::uint32_t and refactor the code so it uses the new types, for readability
 
 ## [low] `.equ` symbols and literals don't share a pool slot
@@ -60,8 +59,8 @@ std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
 - `displacementFromSymbol` asks for the value at *emit* time, so a `.equ` defined
   **later** in the file errors even though it resolves fine by `.end`. A `.equ`
   defined earlier already works, and a label is a spec-mandated error either way
-  (`Project_specs.md:147`, footnote 2).
-- Defensible as-is: footnote 2 says to error when the value "nije poznata u
+  (the spec's footnote on `[%reg + <simbol>]`).
+- Defensible as-is: the footnote says to error when the value "nije poznata u
   trenutku asembliranja", and erroring at the instruction is one reading of that.
 - Fix if a hidden test needs it: give the operand a fixup like `JumpFixup` —
   record `{instruction_offset, symbol}`, emit displacement 0, and patch in a pass
@@ -74,7 +73,7 @@ std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
 
 - `.end` is the only thing that calls `endAssembly`, so a file without it exits 0
   and writes nothing at all. Every public test has `.end`, so this is a strict
-  addition — no specified behaviour changes — and `Project_specs.md:38` says to
+  addition — no specified behaviour changes — and the spec says to
   follow GNU as on undefined details, which assembles fine with no end marker.
 - Two edits: a `bool assembly_ended` guard at the top of `endAssembly` so it is
   idempotent, and a call from `main.cpp` after `parse()` returns 0.
@@ -84,17 +83,3 @@ std::uint16_t getOrCreatePoolEntry(SymIndex symbol);                     // new
   that today, but the EOF path would reintroduce it without the guard.
 - Skip the call and error instead if you would rather a truncated file fail
   loudly: `.end` is the only signal that a file is complete. Same one line.
-
-## [low] Where the built executables land: `bin/` vs project root
-
-- The Makefile builds `bin/asembler`, but the spec invokes `./asembler` from
-  the project root ([Project_specs.md:59](Project_specs.md#L59), and again in
-  the worked example at
-  [504-505](Project_specs.md#L504-L505)).
-- Unclear whether the defense harness cds into the submission root and runs
-  `./asembler` literally, or whether having them under `bin/` is fine. If it's
-  the former, `bin/` fails the run outright — and it is cheap to hedge.
-- Options: (1) build straight into the project root; (2) keep `bin/` and have
-  the default target also drop root-level copies or symlinks.
-- Not urgent, but note the failure mode is submission-day and total, not a
-  code bug that shows up in testing.

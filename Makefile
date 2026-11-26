@@ -44,8 +44,8 @@ $(COMMON_BUILD)/%.o: src/common/%.cpp | $(COMMON_BUILD)
 	$(CXX) $(CXXFLAGS) -I$(INC_DIR) -c -o $@ $<
 
 # --- asembler ---------------------------------------------------------
-# Grammar sources live in misc/ (see Project_specs.md: flex/bison inputs
-# belong there, their generated output must never be submitted). Their
+# Grammar sources live in misc/ (the assignment's place for flex/bison
+# inputs; their generated output must never be submitted). Their
 # generated output is asembler-only, so it lands in that tool's build dir.
 $(ASEMBLER_BUILD)/parser.tab.c: misc/parser.y | $(ASEMBLER_BUILD)
 	$(BISON) -d -o $@ $<
