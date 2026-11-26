@@ -324,13 +324,16 @@ bool Emulator::timerExpired() {
 void Emulator::serviceInterrupts() {
     // Peripherals keep running whether or not the processor is listening: a
     // keystroke still lands in term_in, and the timer still ticks, even masked.
-    const int key = terminal.readKey();
-    if (key >= 0) {
-        term_in = Word(key);
-        terminal_pending = true;
+    if(++instructions_since_poll >= POLL_INTERVAL) {
+        instructions_since_poll = 0;
+        const int key = terminal.readKey();
+        if (key >= 0) {
+            term_in = Word(key);
+            terminal_pending = true;
+        }
+        if (timerExpired())
+            timer_pending = true;
     }
-    if (timerExpired())
-        timer_pending = true;
 
     if (csr[CSR_STATUS] & STATUS_INTERRUPTS_MASKED)
         return;
