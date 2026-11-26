@@ -2,6 +2,10 @@
 #include <iomanip>
 #include <iostream>
 
+// Number of instructions that execute before peripherals are polled
+// Better speed/performance instead of polling peripherals after every executed instruction
+static constexpr unsigned POLL_INTERVAL = 256;
+
 Byte Memory::readByte(Word address) const {
     auto page = pages.find(address / PAGE_SIZE);
     if (page == pages.end())
@@ -324,7 +328,7 @@ bool Emulator::timerExpired() {
 void Emulator::serviceInterrupts() {
     // Peripherals keep running whether or not the processor is listening: a
     // keystroke still lands in term_in, and the timer still ticks, even masked.
-    if(++instructions_since_poll >= POLL_INTERVAL) {
+    if (++instructions_since_poll >= POLL_INTERVAL) {
         instructions_since_poll = 0;
         const int key = terminal.readKey();
         if (key >= 0) {

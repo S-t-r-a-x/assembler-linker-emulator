@@ -9,10 +9,6 @@
 #include "isa.hpp"
 #include "terminal.hpp"
 
-// Number of instructions that execute before peripherals are polled
-// Better speed/performance instead of polling peripherals after every executed instruction
-constexpr Word POLL_INTERVAL = 256;
-
 // Both a cold and a warm restart start here, which is why every public test
 // places its code section at exactly this address.
 constexpr Word RESET_ADDRESS = 0x40000000;
@@ -97,9 +93,9 @@ private:
     // served gets lost rather than queued.
     bool timer_pending = false;
     bool terminal_pending = false;
-    
+
     // Number of instructions since last peripheral poll
-    Word instructions_since_poll = 0;
+    unsigned instructions_since_poll = 0;
 
     Word term_in = 0;
     Word tim_cfg = 0;
